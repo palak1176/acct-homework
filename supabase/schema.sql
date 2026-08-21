@@ -52,8 +52,6 @@ ALTER TABLE questions ADD COLUMN IF NOT EXISTS options JSONB;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 1;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS max_attempts INTEGER;
-ALTER TABLE questions ADD COLUMN IF NOT EXISTS time_limit_sec INTEGER;
-ALTER TABLE questions ADD COLUMN IF NOT EXISTS difficulty TEXT CHECK (difficulty IN ('easy', 'medium', 'hard'));
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS tags TEXT[];
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
 
@@ -66,29 +64,8 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS grader_note TEXT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS session_started_at TIMESTAMPTZ;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS flagged BOOLEAN DEFAULT false;
 
-CREATE TABLE IF NOT EXISTS question_images (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
-  storage_path TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS study_groups (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT NOT NULL,
-  created_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS study_group_members (
-  group_id UUID NOT NULL REFERENCES study_groups(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  joined_at TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY (group_id, user_id)
-);
-
 -- Create view for student-safe question access (no correct_answer)
 CREATE OR REPLACE VIEW questions_public AS
   SELECT id, chapter, title, prompt, type, options, due_at, points, max_attempts,
-         time_limit_sec, difficulty, tags, order_index, created_at, explanation
+         tags, order_index, created_at, explanation
   FROM questions;

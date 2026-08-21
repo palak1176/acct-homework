@@ -57,9 +57,7 @@ Supabase (Postgres + Auth).
 ### Not included
 
 - No automated tests.
-- No email notifications (the `resend` package and `RESEND_API_KEY`/`FROM_EMAIL`
-  env vars are present in `package.json`/`.env.example` but are not called
-  anywhere in the app — see [Known Gaps](#known-gaps--unused-pieces)).
+- No email notifications.
 - No self-service signup flow — user accounts and roles are provisioned manually
   (see [Provisioning Users & Roles](#provisioning-users--roles)).
 
@@ -86,7 +84,7 @@ app/
 │       ├── csv/route.ts            Raw submissions CSV (TA-only)
 │       └── completion-csv/route.ts Per-student completion summary CSV (TA-only)
 ├── globals.css                     All styling (CSS custom properties, no component library)
-└── ServiceWorkerRegister.tsx       Unregisters any previously-installed service worker (see Known Gaps)
+└── ServiceWorkerRegister.tsx       Unregisters any previously-installed service worker on load
 
 lib/
 ├── types.ts                        Shared TypeScript interfaces (User, Question, Submission, MatchPair)
@@ -101,7 +99,8 @@ supabase/
 ├── fix_questions_public_order_index.sql  Adds order_index back to questions_public (run after the above)
 ├── add_matching_labeling_types.sql  Allows matching/labeling question types
 ├── merge_labeling_into_matching.sql Collapses labeling into matching
-└── fix_ta_submissions_policy.sql    Grants + SECURITY DEFINER fix for TA-wide reads (see file for why)
+├── fix_ta_submissions_policy.sql    Grants + SECURITY DEFINER fix for TA-wide reads (see file for why)
+└── drop_unused.sql                  Drops unused tables/columns (question_images, study_groups, study_group_members, time_limit_sec, difficulty)
 ```
 
 ### Auth & role model
@@ -111,9 +110,6 @@ supabase/
   (with `role` set to `ta` or `student`) or the callback route redirects back
   to `/login?error=user_not_setup`. See
   [Provisioning Users & Roles](#provisioning-users--roles).
-- `NEXT_PUBLIC_TA_EMAIL` is defined in `.env.example` but **is not read anywhere
-  in the current codebase** — role assignment is manual, not automatic based on
-  this variable. Don't rely on setting it alone to grant TA access.
 
 ---
 
@@ -146,13 +142,10 @@ Open **SQL Editor** → **New Query** in Supabase, and run each file from `supab
 4. `supabase/add_matching_labeling_types.sql`
 5. `supabase/merge_labeling_into_matching.sql`
 6. `supabase/fix_ta_submissions_policy.sql`
+7. `supabase/drop_unused.sql`
 
 Verify in **Table Editor**: you should see `users`, `questions`, `submissions`,
-`question_images`, `study_groups`, `study_group_members`, and a `questions_public`
-view.
-
-> `question_images`, `study_groups`, and `study_group_members` are created by
-> `schema.sql` but aren't currently used by any app code — safe to ignore.
+and a `questions_public` view.
 
 ### 3. Create a Storage bucket (for image questions)
 
@@ -211,8 +204,6 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon key (client + server) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only privileged Supabase key |
 | `NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET` | Only if using image questions | Storage bucket name for uploaded answer images |
-| `NEXT_PUBLIC_TA_EMAIL` | No | Present for reference only — **not read by the app**; role assignment is manual |
-| `RESEND_API_KEY`, `FROM_EMAIL` | No | Present for a future email feature — **not currently used anywhere in the app** |
 
 `.env.local` is gitignored — verify before committing anything.
 
@@ -324,7 +315,7 @@ is registered in Google Cloud Console's **Authorized redirect URIs**.
 
 ### Database errors creating/reading questions
 
-Confirm all six SQL files under `supabase/` were run, **in order** (see
+Confirm all seven SQL files under `supabase/` were run, **in order** (see
 [Supabase Setup](#supabase-setup)). Running them out of order can leave
 `questions_public` missing columns the app expects (`order_index`,
 `available_at`, `explanation`).
@@ -356,20 +347,9 @@ that the bucket allows the uploads/reads your policies need.
 
 ## Known Gaps / Unused Pieces
 
-Worth knowing if you extend this app — these exist in the repo but aren't wired up:
-
-- **`resend` package / `RESEND_API_KEY` / `FROM_EMAIL`** — dependency and env vars
-  are present, but no code sends email anywhere.
-- **`NEXT_PUBLIC_TA_EMAIL`** — not read by the app; doesn't auto-assign the `ta`
-  role. Role assignment is manual (see above).
 - **`public/manifest.json` / `public/sw.js`** — PWA scaffolding exists, but
   `app/ServiceWorkerRegister.tsx` actively **unregisters** any installed service
   worker on load rather than registering one, so the app is not currently
-  installable/offline-capable.
-- **`tailwindcss`, `postcss`, `autoprefixer`** — listed as dependencies, but there
-  is no `tailwind.config`/`postcss.config` and no Tailwind classes in use. All
-  styling is plain CSS in `app/globals.css`.
-- **`question_images`, `study_groups`, `study_group_members` tables** — created
-  by `schema.sql`, not referenced by any current app code.
-- **`time_limit_sec`, `difficulty` columns** on `questions` — exist in the schema
-  and `questions_public` view, but no UI currently sets or displays them.
+  installable/offline-capable. Left as-is intentionally; wire up
+  `ServiceWorkerRegister` to register `sw.js` if you want offline/installable
+  support.

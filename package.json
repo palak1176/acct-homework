@@ -18,15 +18,9 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "autoprefixer": "^10.5.4",
     "next": "^16.3.0",
-    "postcss": "^8.5.26",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
-  },
-  "dependencies": {
-    "resend": "^6.19.0"
   }
 }
