@@ -13,15 +13,20 @@ export interface Question {
   correct_answer?: string;
   explanation?: string | null;
   created_at: string;
-  type?: "text" | "multiple_choice" | "fill_blank" | "image";
+  type?: "text" | "multiple_choice" | "fill_blank" | "image" | "matching";
   options?: any[] | null;
   due_at?: string | null;
+  available_at?: string | null;
   points?: number;
   max_attempts?: number | null;
-  time_limit_sec?: number | null;
-  difficulty?: "easy" | "medium" | "hard" | null;
   tags?: string[] | null;
   order_index?: number;
+}
+
+export interface MatchPair {
+  id: string;
+  left: string;
+  right: string;
 }
 
 export interface Submission {

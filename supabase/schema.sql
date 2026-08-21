@@ -47,7 +47,7 @@ CREATE INDEX idx_submissions_user_id ON submissions(user_id);
 CREATE INDEX idx_submissions_question_id ON submissions(question_id);
 
 -- Phase 1 Schema Extensions
-ALTER TABLE questions ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'text' CHECK (type IN ('text', 'multiple_choice', 'fill_blank', 'image'));
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'text' CHECK (type IN ('text', 'multiple_choice', 'fill_blank', 'image', 'matching'));
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS options JSONB;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS points INTEGER DEFAULT 1;

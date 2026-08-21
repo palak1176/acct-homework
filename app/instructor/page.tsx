@@ -1,13 +1,27 @@
 "use client";
 import { createClient } from "@/lib/supabase-client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Question } from "@/lib/types";
+import type { Question, MatchPair } from "@/lib/types";
 
-const chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+function parsePairs(text: string): MatchPair[] {
+  return text
+    .split("\n")
+    .map(line => {
+      const [left, right] = line.split("|").map(s => s.trim());
+      return { left, right };
+    })
+    .filter(p => p.left && p.right)
+    .map((p, i) => ({ id: String(i), ...p }));
+}
 
 export default function InstructorPage() {
   const supabase = createClient();
+  const router = useRouter();
+  const [authorized, setAuthorized] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -16,37 +30,359 @@ export default function InstructorPage() {
   const [chapter, setChapter] = useState(1);
   const [type, setType] = useState("text");
   const [options, setOptions] = useState("");
-  const [difficulty, setDifficulty] = useState("medium");
+  const [pairs, setPairs] = useState("");
+  const [filterChapter, setFilterChapter] = useState<number | null>(null);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [bulkAvailableAt, setBulkAvailableAt] = useState("");
+  const [bulkDueAt, setBulkDueAt] = useState("");
+  const [applyingBulkSchedule, setApplyingBulkSchedule] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Question | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [submissionCounts, setSubmissionCounts] = useState<Map<string, number>>(new Map());
 
-  useEffect(() => { loadQuestions(); }, []);
+  useEffect(() => { checkAccess(); }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+  };
+
+  const dragStateRef = useRef({ draggedId, questions, filterChapter });
+  useEffect(() => {
+    dragStateRef.current = { draggedId, questions, filterChapter };
+  });
+
+  useEffect(() => {
+    const handleMouseUp = async () => {
+      const { draggedId, questions, filterChapter } = dragStateRef.current;
+      if (!draggedId || filterChapter === null) {
+        setDraggedId(null);
+        return;
+      }
+
+      setDraggedId(null);
+
+      const chapterQuestions = questions.filter(q => q.chapter === filterChapter);
+      await Promise.all(
+        chapterQuestions.map((q, i) =>
+          fetch("/api/questions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: q.id, order_index: i }),
+          })
+        )
+      );
+
+      await loadQuestions();
+    };
+
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, []);
+
+  const handleDragEnter = (targetId: string) => {
+    if (!draggedId || draggedId === targetId || filterChapter === null) return;
+
+    setQuestions(current => {
+      const chapterQuestions = current.filter(q => q.chapter === filterChapter);
+      const otherQuestions = current.filter(q => q.chapter !== filterChapter);
+
+      const fromIndex = chapterQuestions.findIndex(q => q.id === draggedId);
+      const toIndex = chapterQuestions.findIndex(q => q.id === targetId);
+      if (fromIndex === -1 || toIndex === -1) return current;
+
+      const reordered = [...chapterQuestions];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+
+      return [...otherQuestions, ...reordered];
+    });
+  };
+
+  const checkAccess = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    const { data: userRow } = await supabase.from("users").select("role").eq("id", user.id).single();
+    if (!userRow || userRow.role !== "ta") {
+      router.replace("/student");
+      return;
+    }
+
+    setAuthorized(true);
+    loadQuestions();
+  };
 
   const loadQuestions = async () => {
-    const { data } = await supabase.from("questions_public").select("*").order("chapter");
-    if (data) setQuestions(data as Question[]);
+    const { data, error } = await supabase
+      .from("questions")
+      .select("*")
+      .order("chapter")
+      .order("order_index");
+
+    console.log("[INSTRUCTOR] Questions data:", data);
+    console.log("[INSTRUCTOR] Questions error:", error);
+
+    if (error) {
+      console.error("[INSTRUCTOR] Failed to load questions:", error);
+      return;
+    }
+
+    if (data) {
+      setQuestions(data as Question[]);
+    }
+
+    const { data: subs } = await supabase.from("submissions").select("question_id");
+    if (subs) {
+      const counts = new Map<string, number>();
+      subs.forEach((s: any) => counts.set(s.question_id, (counts.get(s.question_id) || 0) + 1));
+      setSubmissionCounts(counts);
+    }
+  };
+
+  const editQuestion = async (q: Question) => {
+    setEditingId(q.id);
+
+    setTitle(q.title || "");
+    setPrompt(q.prompt || "");
+    setAnswer(q.correct_answer || "");
+    setExplanation(q.explanation || "");
+    setChapter(q.chapter || 1);
+    setType(q.type || "text");
+
+    if (q.type === "matching") {
+      setOptions("");
+      setPairs(
+        Array.isArray(q.options)
+          ? (q.options as MatchPair[]).map(p => `${p.left} | ${p.right}`).join("\n")
+          : ""
+      );
+    } else if (Array.isArray(q.options)) {
+      setOptions(q.options.join("\n"));
+      setPairs("");
+    } else {
+      setOptions("");
+      setPairs("");
+    }
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
+  const saveEdit = async () => {
+    const isMatchType = type === "matching";
+    const parsedPairs = isMatchType ? parsePairs(pairs) : [];
+
+    if (!editingId || !title || !prompt) return;
+    if (isMatchType ? parsedPairs.length < 2 : !answer) return;
+
+    setSavingEdit(true);
+
+    try {
+      const response = await fetch("/api/questions", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: editingId,
+          title,
+          prompt,
+          correct_answer: isMatchType
+            ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
+            : answer,
+          explanation,
+          chapter,
+          type,
+          options: isMatchType
+            ? parsedPairs
+            : type === "multiple_choice"
+              ? options.split("\n").filter(Boolean)
+              : null,
+        }),
+      });
+
+      const result = await response.json();
+
+      console.log("[INSTRUCTOR] Edit response:", result);
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to update question");
+      }
+
+      // Clear edit mode
+      setEditingId(null);
+      setTitle("");
+      setPrompt("");
+      setAnswer("");
+      setExplanation("");
+      setOptions("");
+      setPairs("");
+
+      showToast("Question updated");
+      await loadQuestions();
+    } catch (error) {
+      console.error("[INSTRUCTOR] Edit failed:", error);
+
+      showToast(
+        error instanceof Error ? error.message : "Failed to update question",
+        "error"
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const applyBulkSchedule = async () => {
+    if (filterChapter === null || (!bulkAvailableAt && !bulkDueAt)) return;
+
+    setApplyingBulkSchedule(true);
+
+    try {
+      const chapterQuestions = questions.filter(q => q.chapter === filterChapter);
+      const body: { available_at?: string; due_at?: string } = {};
+      if (bulkAvailableAt) body.available_at = new Date(bulkAvailableAt).toISOString();
+      if (bulkDueAt) body.due_at = new Date(bulkDueAt).toISOString();
+
+      await Promise.all(
+        chapterQuestions.map(q =>
+          fetch("/api/questions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: q.id, ...body }),
+          })
+        )
+      );
+
+      showToast(`Schedule applied to Chapter ${filterChapter}`);
+      await loadQuestions();
+    } catch (error) {
+      console.error("[INSTRUCTOR] Bulk schedule failed:", error);
+      showToast("Failed to apply schedule to chapter", "error");
+    } finally {
+      setApplyingBulkSchedule(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+
+    setDeletingId(deleteTarget.id);
+
+    try {
+      const response = await fetch(
+        `/api/questions?id=${encodeURIComponent(deleteTarget.id)}`,
+        { method: "DELETE" }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to delete question");
+      }
+
+      setQuestions(current => current.filter(q => q.id !== deleteTarget.id));
+      showToast(`Deleted "${deleteTarget.title}"`);
+      setDeleteTarget(null);
+      await loadQuestions();
+    } catch (error) {
+      console.error("[INSTRUCTOR] Delete failed:", error);
+      showToast(
+        error instanceof Error ? error.message : "Failed to delete question",
+        "error"
+      );
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const createQuestion = async () => {
-    if (!title || !prompt || !answer) return;
+    const isMatchType = type === "matching";
+    const parsedPairs = isMatchType ? parsePairs(pairs) : [];
+
+    if (!title || !prompt) return;
+    if (isMatchType ? parsedPairs.length < 2 : !answer) return;
+
     setCreating(true);
-    await fetch("/api/questions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title, prompt, correct_answer: answer, explanation,
-        chapter, type, difficulty,
-        options: type === "multiple_choice" ? options.split("\n").filter(Boolean) : null,
-      }),
-    });
-    setTitle(""); setPrompt(""); setAnswer(""); setExplanation(""); setOptions("");
-    setCreating(false);
-    loadQuestions();
+
+    try {
+      const response = await fetch("/api/questions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          prompt,
+          correct_answer: isMatchType
+            ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
+            : answer,
+          explanation,
+          chapter,
+          type,
+          options: isMatchType
+            ? parsedPairs
+            : type === "multiple_choice"
+              ? options.split("\n").filter(Boolean)
+              : null,
+        }),
+      });
+
+      const result = await response.json();
+
+      console.log("[INSTRUCTOR] Create question response:", result);
+
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to create question");
+      }
+
+      // Only clear the form after successful creation
+      setTitle("");
+      setPrompt("");
+      setAnswer("");
+      setExplanation("");
+      setOptions("");
+      setPairs("");
+
+      showToast("Question created");
+      // Reload questions
+      await loadQuestions();
+    } catch (error) {
+      console.error("[INSTRUCTOR] Failed to create question:", error);
+      showToast(
+        error instanceof Error ? error.message : "Failed to create question",
+        "error"
+      );
+    } finally {
+      setCreating(false);
+    }
   };
+
+  if (!authorized) return <div style={{ padding: "40px", textAlign: "center" }}>Loading...</div>;
+
+  const isMatchType = type === "matching";
+  const questionChapters = Array.from(new Set(questions.map(q => q.chapter))).sort((a, b) => a - b);
+  const filteredQuestions = filterChapter ? questions.filter(q => q.chapter === filterChapter) : questions;
+
 
   return (
     <div>
       <div className="page-header">
-        <h1><span className="logo-mark">HW</span> Instructor View</h1>
+        <h1><span className="logo-mark">ACCT 2101</span> Instructor View</h1>
         <div className="page-header-nav">
           <Link href="/analytics" className="btn btn-ghost-navy" style={{ padding: "8px 16px", fontSize: "14px" }}>Analytics</Link>
           <Link href="/student" className="btn btn-secondary" style={{ padding: "8px 16px", fontSize: "14px" }}>Student View →</Link>
@@ -55,7 +391,7 @@ export default function InstructorPage() {
 
       <div className="container">
         <div style={{ marginBottom: "40px" }}>
-          <h2>Create Question</h2>
+          <h2>{editingId ? "Edit Question" : "Create Question"}</h2>
           <div className="card" style={{ padding: "24px" }}>
             <div className="form-row">
               <div className="form-group">
@@ -68,23 +404,17 @@ export default function InstructorPage() {
                   {chapters.map(ch => <option key={ch} value={ch}>Chapter {ch}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label>Difficulty</label>
-                <select value={difficulty} onChange={e => setDifficulty(e.target.value)}>
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-              </div>
             </div>
             <div className="form-group">
               <label>Prompt</label>
               <textarea placeholder="What do you want students to answer?" value={prompt} onChange={e => setPrompt(e.target.value)} />
             </div>
-            <div className="form-group">
-              <label>Correct Answer</label>
-              <textarea placeholder="Debit Cash 1000, Credit Revenue 1000" value={answer} onChange={e => setAnswer(e.target.value)} />
-            </div>
+            {!isMatchType && (
+              <div className="form-group">
+                <label>Correct Answer</label>
+                <textarea placeholder="Debit Cash 1000, Credit Revenue 1000" value={answer} onChange={e => setAnswer(e.target.value)} />
+              </div>
+            )}
             <div className="form-group">
               <label>Explanation (Optional)</label>
               <textarea placeholder="Why is this the correct answer?" value={explanation} onChange={e => setExplanation(e.target.value)} />
@@ -96,6 +426,7 @@ export default function InstructorPage() {
                   <option value="text">Text Answer</option>
                   <option value="multiple_choice">Multiple Choice</option>
                   <option value="fill_blank">Fill in the Blank</option>
+                  <option value="matching">Matching</option>
                 </select>
               </div>
             </div>
@@ -105,29 +436,288 @@ export default function InstructorPage() {
                 <textarea placeholder="Option A&#10;Option B&#10;Option C" value={options} onChange={e => setOptions(e.target.value)} />
               </div>
             )}
-            <button onClick={createQuestion} disabled={creating} className="btn btn-primary" style={{ marginTop: "16px" }}>
-              {creating ? "Creating..." : "Create Question"}
-            </button>
+            {isMatchType && (
+              <div className="form-group">
+                <label>Pairs (one per line, {`left | right`})</label>
+                <textarea
+                  placeholder="Asset | Debit&#10;Liability | Credit"
+                  value={pairs}
+                  onChange={e => setPairs(e.target.value)}
+                />
+                <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "6px 0 0 0" }}>
+                  Students see the left side and pick the matching right-side value from a dropdown. Partial credit is awarded per correct pair.
+                </p>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
+              {editingId ? (
+                <>
+                  <button
+                    onClick={saveEdit}
+                    disabled={savingEdit}
+                    className="btn btn-primary"
+                  >
+                    {savingEdit ? "Saving..." : "Save Changes"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setEditingId(null);
+                      setTitle("");
+                      setPrompt("");
+                      setAnswer("");
+                      setExplanation("");
+                      setOptions("");
+                      setPairs("");
+                    }}
+                    disabled={savingEdit}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={createQuestion}
+                  disabled={creating}
+                  className="btn btn-primary"
+                >
+                  {creating ? "Creating..." : "Create Question"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         <div>
-          <h2>All Questions ({questions.length})</h2>
+          <h2>All Questions ({filteredQuestions.length})</h2>
+
+          <div className="filter-tabs" style={{ marginBottom: "20px" }}>
+            <button
+              className={`tab ${filterChapter === null ? "active" : ""}`}
+              onClick={() => { setFilterChapter(null); setBulkAvailableAt(""); setBulkDueAt(""); }}
+            >
+              All Chapters
+            </button>
+            {questionChapters.map(ch => (
+              <button
+                key={ch}
+                className={`tab ${filterChapter === ch ? "active" : ""}`}
+                onClick={() => { setFilterChapter(ch); setBulkAvailableAt(""); setBulkDueAt(""); }}
+              >
+                Ch {ch}
+              </button>
+            ))}
+          </div>
+
+          {filterChapter === null && questionChapters.length > 0 && (
+            <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "12px" }}>
+              Select a chapter tab to drag and reorder its questions.
+            </p>
+          )}
+
+          {filterChapter !== null && (
+            <div className="card" style={{ padding: "16px 20px", marginBottom: "20px" }}>
+              <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "10px" }}>
+                Set schedule for all Chapter {filterChapter} questions
+              </div>
+              <div className="form-row" style={{ alignItems: "flex-end" }}>
+                <div className="form-group">
+                  <label>Available From</label>
+                  <input type="datetime-local" value={bulkAvailableAt} onChange={e => setBulkAvailableAt(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>Due Date</label>
+                  <input type="datetime-local" value={bulkDueAt} onChange={e => setBulkDueAt(e.target.value)} />
+                </div>
+                <button
+                  onClick={applyBulkSchedule}
+                  disabled={applyingBulkSchedule || (!bulkAvailableAt && !bulkDueAt)}
+                  className="btn btn-primary"
+                  style={{ height: "44px" }}
+                >
+                  {applyingBulkSchedule ? "Applying..." : `Apply to Chapter ${filterChapter}`}
+                </button>
+              </div>
+              <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "8px 0 0 0" }}>
+                Only the fields you fill in are applied — leave one blank to leave existing values untouched.
+              </p>
+            </div>
+          )}
+
           <div style={{ display: "grid", gap: "16px" }}>
-            {questions.map(q => (
-              <div key={q.id} className="question-card" style={{ borderLeftColor: "var(--navy)" }}>
-                <div className="question-title">{q.title}</div>
-                <p style={{ margin: "8px 0", color: "var(--text)", fontSize: "14px" }}>{q.prompt}</p>
-                <div className="question-meta">
-                  <span className="badge badge-chapter">Ch {q.chapter}</span>
-                  <span className={`badge badge-difficulty-${q.difficulty || "medium"}`}>{(q.difficulty || "medium").toUpperCase()}</span>
+            {filteredQuestions.map(q => (
+              <div
+                key={q.id}
+                onMouseEnter={() => handleDragEnter(q.id)}
+                className="question-card"
+                style={{
+                  borderLeftColor: "var(--navy)",
+                  opacity: draggedId === q.id ? 0.5 : 1,
+                  userSelect: draggedId ? "none" : undefined,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  {filterChapter !== null && (
+                    <span
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        setDraggedId(q.id);
+                      }}
+                      style={{
+                        color: "var(--text-muted)",
+                        fontSize: "18px",
+                        lineHeight: 1,
+                        cursor: "grab",
+                        padding: "8px",
+                        margin: "-8px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                      }}
+                      title="Drag to reorder"
+                    >
+                      ⠿
+                    </span>
+                  )}
+                  <div className="question-title">{q.title}</div>
+                </div>
+
+                <p
+                  style={{
+                    margin: "8px 0",
+                    color: "var(--text)",
+                    fontSize: "14px",
+                  }}
+                >
+                  {q.prompt}
+                </p>
+
+                <div
+                  className="question-meta"
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <span className="badge badge-chapter">
+                      Ch {q.chapter}
+                    </span>
+                    {q.available_at && (
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        Opens {new Date(q.available_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                      </span>
+                    )}
+                    {q.due_at && (
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        Due {new Date(q.due_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    {/* EDIT */}
+                    <button
+                      className="btn btn-secondary"
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: "12px",
+                      }}
+                      onClick={() => editQuestion(q)}
+                    >
+                      Edit
+                    </button>
+
+                    {/* DELETE */}
+                    <button
+                      className="btn"
+                      style={{
+                        background: "#dc2626",
+                        color: "white",
+                        padding: "6px 12px",
+                        fontSize: "12px",
+                      }}
+                      onClick={() => setDeleteTarget(q)}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
-            {questions.length === 0 && <p style={{ color: "var(--text-muted)" }}>No questions yet. Create one above.</p>}
+
+            {filteredQuestions.length === 0 && (
+              <p style={{ color: "var(--text-muted)" }}>
+                {questions.length === 0 ? "No questions yet. Create one above." : "No questions in this chapter."}
+              </p>
+            )}
           </div>
         </div>
       </div>
+
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => setDeleteTarget(null)}>
+          <div className="modal-box" style={{ maxWidth: "420px" }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginBottom: "8px" }}>Delete question?</h2>
+            <p style={{ color: "var(--text-muted)", marginBottom: "16px" }}>
+              &ldquo;{deleteTarget.title}&rdquo; will be permanently deleted. This cannot be undone.
+            </p>
+            {(submissionCounts.get(deleteTarget.id) || 0) > 0 && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: "8px",
+                backgroundColor: "var(--red-light)",
+                borderLeft: "4px solid var(--red)",
+                marginBottom: "16px",
+              }}>
+                <p style={{ margin: 0, color: "var(--red)", fontWeight: 600, fontSize: "14px" }}>
+                  ⚠ {submissionCounts.get(deleteTarget.id)} student{submissionCounts.get(deleteTarget.id) === 1 ? "" : "s"} already submitted an answer to this question.
+                </p>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button
+                className="btn"
+                style={{ background: "#dc2626", color: "white", flex: 1 }}
+                onClick={confirmDelete}
+                disabled={deletingId === deleteTarget.id}
+              >
+                {deletingId === deleteTarget.id ? "Deleting..." : "Delete"}
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1 }}
+                onClick={() => setDeleteTarget(null)}
+                disabled={deletingId === deleteTarget.id}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "24px",
+            right: "24px",
+            zIndex: 300,
+            padding: "12px 20px",
+            borderRadius: "8px",
+            backgroundColor: toast.type === "success" ? "var(--green)" : "var(--red)",
+            color: "var(--surface)",
+            boxShadow: "var(--shadow-lg)",
+            fontSize: "14px",
+            fontWeight: 600,
+            animation: "slide-up 200ms ease",
+          }}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }

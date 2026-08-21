@@ -29,18 +29,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Question is past due" }, { status: 403 });
     }
 
-    // Check attempt count
-    if (question.max_attempts) {
-      const { data: submission } = await supabase
-        .from("submissions")
-        .select("attempt_count")
-        .eq("user_id", user.id)
-        .eq("question_id", question_id)
-        .single();
+    if (question.available_at && new Date() < new Date(question.available_at)) {
+      return NextResponse.json({ error: "Question is not yet available" }, { status: 403 });
+    }
 
-      if (submission && submission.attempt_count >= question.max_attempts) {
-        return NextResponse.json({ error: "Max attempts reached" }, { status: 403 });
-      }
+    // Only one attempt is allowed per question
+    const { data: existingSubmission } = await supabase
+      .from("submissions")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("question_id", question_id)
+      .single();
+
+    if (existingSubmission) {
+      return NextResponse.json({ error: "You have already submitted an answer for this question" }, { status: 403 });
     }
 
     // Grade the answer
@@ -54,6 +56,20 @@ export async function POST(req: NextRequest) {
       // correct_answer is the option value/index
       is_correct = answer === question.correct_answer;
       score = is_correct ? (question.points || 1) : 0;
+    } else if (question.type === "matching") {
+      // answer is a JSON-encoded map of pair id -> chosen right-side value
+      let studentMap: Record<string, string> = {};
+      let correctMap: Record<string, string> = {};
+      try { studentMap = JSON.parse(answer); } catch { studentMap = {}; }
+      try { correctMap = JSON.parse(question.correct_answer); } catch { correctMap = {}; }
+
+      const pairIds = Object.keys(correctMap);
+      const matches = pairIds.filter(id => studentMap[id] === correctMap[id]).length;
+
+      is_correct = pairIds.length > 0 && matches === pairIds.length;
+      score = pairIds.length > 0
+        ? Math.round((matches / pairIds.length) * (question.points || 1) * 100) / 100
+        : 0;
     } else if (question.type === "image") {
       // TA must manually grade image submissions
       is_correct = null;
@@ -71,12 +87,7 @@ export async function POST(req: NextRequest) {
           image_url: question.type === "image" ? image_url : null,
           is_correct,
           score,
-          attempt_count: ((await supabase
-            .from("submissions")
-            .select("attempt_count")
-            .eq("user_id", user.id)
-            .eq("question_id", question_id)
-            .single()).data?.attempt_count || 0) + 1,
+          attempt_count: 1,
           submitted_at: new Date().toISOString(),
           graded_at: is_correct !== null ? new Date().toISOString() : null,
         },
@@ -93,6 +104,7 @@ export async function POST(req: NextRequest) {
       is_correct,
       score,
       explanation: question.explanation,
+      correct_answer: question.correct_answer,
       message: is_correct ? "Correct!" : is_correct === false ? "Incorrect" : "Submitted for manual grading",
     });
   } catch (e: any) {

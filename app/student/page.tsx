@@ -1,38 +1,57 @@
 "use client";
 import { createClient } from "@/lib/supabase-client";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Question, Submission } from "@/lib/types";
+import type { Question, Submission, MatchPair } from "@/lib/types";
 
-const chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+function shuffle<T>(arr: T[]): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+const chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export default function StudentPage() {
   const supabase = createClient();
+  const router = useRouter();
+  const [authorized, setAuthorized] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submissions, setSubmissions] = useState<Map<string, Submission>>(new Map());
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
   const [studentAnswer, setStudentAnswer] = useState("");
-  const [feedback, setFeedback] = useState<{ is_correct: boolean | null; score: number | null; explanation: string | null } | null>(null);
+  const [matchAnswers, setMatchAnswers] = useState<Record<string, string>>({});
+  const [matchRightOptions, setMatchRightOptions] = useState<string[]>([]);
+  const [feedback, setFeedback] = useState<{ is_correct: boolean | null; score: number | null; explanation: string | null; correct_answer: string | null } | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [filterChapter, setFilterChapter] = useState<number | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { checkAccess(); }, []);
 
-  useEffect(() => {
-    if (!selectedQuestion?.time_limit_sec) return;
-    setTimeRemaining(selectedQuestion.time_limit_sec);
-    const timer = setInterval(() => {
-      setTimeRemaining(prev => {
-        if (prev === null || prev <= 1) { clearInterval(timer); return null; }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [selectedQuestion]);
+  const checkAccess = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    const { data: userRow } = await supabase.from("users").select("role").eq("id", user.id).single();
+    if (!userRow) {
+      router.replace("/login");
+      return;
+    }
+
+    setAuthorized(true);
+    loadData();
+  };
 
   const loadData = async () => {
-    const { data } = await supabase.from("questions_public").select("*").order("chapter");
+    const { data } = await supabase.from("questions_public").select("*").order("chapter").order("order_index");
     if (data) setQuestions(data as Question[]);
     const { data: subs } = await supabase.from("submissions").select("*");
     if (subs) {
@@ -42,15 +61,44 @@ export default function StudentPage() {
     }
   };
 
+  const viewResult = async (q: Question) => {
+    try {
+      const res = await fetch(`/api/submission-result?question_id=${q.id}`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to load result");
+        return;
+      }
+      setStudentAnswer("");
+      setSubmitError(null);
+      setFeedback(data);
+      setSelectedQuestion(q);
+    } catch {
+      alert("Failed to load result");
+    }
+  };
+
+  const isMatchType = selectedQuestion?.type === "matching";
+  const matchPairCount = Array.isArray(selectedQuestion?.options) ? (selectedQuestion!.options as MatchPair[]).length : 0;
+  const matchComplete = isMatchType && Object.keys(matchAnswers).length === matchPairCount && matchPairCount > 0;
+
   const submitAnswer = async () => {
-    if (!selectedQuestion || !studentAnswer) return;
+    if (!selectedQuestion) return;
+    const answerToSend = isMatchType ? JSON.stringify(matchAnswers) : studentAnswer;
+    if (isMatchType ? !matchComplete : !studentAnswer) return;
     setSubmitting(true);
+    setSubmitError(null);
     const res = await fetch("/api/submit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question_id: selectedQuestion.id, answer: studentAnswer }),
+      body: JSON.stringify({ question_id: selectedQuestion.id, answer: answerToSend }),
     });
     const data = await res.json();
+    if (!res.ok) {
+      setSubmitError(data.error || "Failed to submit answer");
+      setSubmitting(false);
+      return;
+    }
     setFeedback(data);
     setSubmitting(false);
     loadData();
@@ -58,13 +106,14 @@ export default function StudentPage() {
 
   const filteredQuestions = filterChapter ? questions.filter(q => q.chapter === filterChapter) : questions;
 
+  if (!authorized) return <div style={{ padding: "40px", textAlign: "center" }}>Loading...</div>;
+
   return (
     <div>
       <div className="page-header">
-        <h1><span className="logo-mark">HW</span> Homework</h1>
+        <h1><span className="logo-mark">ACCT 2101</span> Homework</h1>
         <div className="page-header-nav">
           <Link href="/progress" className="btn btn-ghost-navy" style={{ padding: "8px 16px", fontSize: "14px" }}>Progress</Link>
-          <Link href="/instructor" className="btn btn-secondary" style={{ padding: "8px 16px", fontSize: "14px" }}>Instructor View →</Link>
         </div>
       </div>
 
@@ -80,22 +129,73 @@ export default function StudentPage() {
         <div style={{ display: "grid", gap: "16px", marginBottom: "40px" }}>
           {filteredQuestions.map(q => {
             const submitted = submissions.has(q.id);
+            const now = new Date();
+            const dueDate = q.due_at ? new Date(q.due_at) : null;
+            const pastDue = dueDate ? now > dueDate : false;
+            const dueSoon = dueDate && !pastDue ? dueDate.getTime() - now.getTime() <= 24 * 60 * 60 * 1000 : false;
+            const available = !q.available_at || new Date(q.available_at) <= now;
+            const clickable = submitted ? true : available && !pastDue;
+            const onCardClick = submitted
+              ? () => viewResult(q)
+              : clickable
+              ? () => {
+                  setSelectedQuestion(q);
+                  setFeedback(null);
+                  setSubmitError(null);
+                  setStudentAnswer("");
+                  setMatchAnswers({});
+                  if (q.type === "matching" && Array.isArray(q.options)) {
+                    const uniqueRights = Array.from(new Set((q.options as MatchPair[]).map(p => p.right)));
+                    setMatchRightOptions(shuffle(uniqueRights));
+                  } else {
+                    setMatchRightOptions([]);
+                  }
+                }
+              : undefined;
             return (
-              <div key={q.id} className={`question-card ${submitted ? "submitted" : ""}`}
-                onClick={() => { setSelectedQuestion(q); setFeedback(null); setStudentAnswer(""); }}>
+              <div
+                key={q.id}
+                className={`question-card ${submitted ? "submitted" : ""}`}
+                style={{ cursor: clickable ? "pointer" : "default", opacity: !submitted && (!available || pastDue) ? 0.6 : 1 }}
+                onClick={onCardClick}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                   <div style={{ flex: 1 }}>
                     <div className="question-title">{q.title}</div>
                     <p style={{ margin: "8px 0 12px 0", color: "var(--text)", fontSize: "14px" }}>{q.prompt}</p>
                     <div className="question-meta">
                       <span className="badge badge-chapter">Ch {q.chapter}</span>
-                      <span className={`badge badge-difficulty-${q.difficulty || "medium"}`}>{(q.difficulty || "medium").toUpperCase()}</span>
                       {submitted && <span className="badge badge-submitted">✓ Submitted</span>}
+                      {!submitted && !available && (
+                        <span className="badge" style={{ backgroundColor: "var(--border)", color: "var(--text-muted)" }}>Not Yet Available</span>
+                      )}
+                      {!submitted && available && pastDue && (
+                        <span className="badge" style={{ backgroundColor: "var(--red)", color: "var(--surface)" }}>Past Due</span>
+                      )}
+                      {!submitted && available && !pastDue && dueSoon && (
+                        <span className="badge" style={{ backgroundColor: "#ffc107", color: "var(--navy)" }}>Due Soon</span>
+                      )}
+                      {!submitted && !available && q.available_at && (
+                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                          Opens {new Date(q.available_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                        </span>
+                      )}
+                      {q.due_at && (
+                        <span style={{ fontSize: "12px", color: dueSoon || pastDue ? "var(--red)" : "var(--text-muted)", fontWeight: dueSoon || pastDue ? 600 : 400 }}>
+                          Due {new Date(q.due_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <button className="btn btn-primary" style={{ marginLeft: "16px", minWidth: "100px", fontSize: "13px" }}>
-                    {submitted ? "Edit" : "Answer"}
-                  </button>
+                  {submitted ? (
+                    <button className="btn btn-ghost" style={{ marginLeft: "16px", minWidth: "100px", fontSize: "13px" }}>
+                      View Result
+                    </button>
+                  ) : (
+                    <button className="btn btn-primary" disabled={!clickable} style={{ marginLeft: "16px", minWidth: "100px", fontSize: "13px" }}>
+                      Answer
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -106,24 +206,27 @@ export default function StudentPage() {
 
       {selectedQuestion && (
         <div className="modal-overlay" onClick={() => setSelectedQuestion(null)}>
-          <div className="modal-box" onClick={e => e.stopPropagation()}>
+          <div className="modal-box" style={isMatchType ? { maxWidth: "720px" } : undefined} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <h2 style={{ marginBottom: "4px" }}>{selectedQuestion.title}</h2>
-                <p style={{ margin: "0", color: "var(--text-muted)", fontSize: "14px" }}>Chapter {selectedQuestion.chapter}</p>
+                <p style={{ margin: "0", color: "var(--text-muted)", fontSize: "14px" }}>
+                  Chapter {selectedQuestion.chapter}
+                  {selectedQuestion.due_at && ` · Due ${new Date(selectedQuestion.due_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`}
+                </p>
               </div>
-              {selectedQuestion.time_limit_sec && timeRemaining !== null && (
-                <div style={{ color: timeRemaining < 10 ? "var(--red)" : "var(--text-muted)", fontSize: "14px", fontWeight: "600" }}>
-                  ⏱ {timeRemaining}s
-                </div>
-              )}
             </div>
             <div className="modal-content">
               <p style={{ color: "var(--text)", lineHeight: "1.6" }}>{selectedQuestion.prompt}</p>
               {!feedback ? (
                 <>
+                  {submitError && (
+                    <div style={{ padding: "12px 16px", borderRadius: "8px", backgroundColor: "var(--red-light)", borderLeft: "4px solid var(--red)", marginBottom: "16px" }}>
+                      <p style={{ margin: "0", color: "var(--red)", fontWeight: "600" }}>{submitError}</p>
+                    </div>
+                  )}
                   {selectedQuestion.type === "text" || selectedQuestion.type === "fill_blank" ? (
-                    <textarea value={studentAnswer} onChange={e => setStudentAnswer(e.target.value)} placeholder="Your answer..." style={{ marginBottom: "16px" }} />
+                    <textarea value={studentAnswer} onChange={e => setStudentAnswer(e.target.value)} placeholder="Your answer..." style={{ width: "100%", boxSizing: "border-box", marginBottom: "16px" }} />
                   ) : selectedQuestion.type === "multiple_choice" && selectedQuestion.options ? (
                     <div style={{ marginBottom: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
                       {(selectedQuestion.options as any[]).map((opt, idx) => (
@@ -133,8 +236,67 @@ export default function StudentPage() {
                         </label>
                       ))}
                     </div>
+                  ) : isMatchType && Array.isArray(selectedQuestion.options) ? (
+                    <div
+                      style={{
+                        marginBottom: "16px",
+                        display: "grid",
+                        gridTemplateColumns: "minmax(100px, max-content) 1fr",
+                        rowGap: "8px",
+                        columnGap: 0,
+                      }}
+                    >
+                      {(selectedQuestion.options as MatchPair[]).map(pair => (
+                        <Fragment key={pair.id}>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "12px 14px",
+                              border: "1px solid var(--border)",
+                              borderRight: "none",
+                              borderRadius: "8px 0 0 8px",
+                              backgroundColor: matchAnswers[pair.id] ? "rgba(201, 162, 39, 0.1)" : "transparent",
+                              fontSize: "14px",
+                              fontWeight: 600,
+                              lineHeight: 1.4,
+                              maxWidth: "280px",
+                              overflowWrap: "anywhere",
+                            }}
+                          >
+                            {pair.left}
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              padding: "8px 10px",
+                              border: "1px solid var(--border)",
+                              borderRadius: "0 8px 8px 0",
+                              backgroundColor: matchAnswers[pair.id] ? "rgba(201, 162, 39, 0.1)" : "transparent",
+                            }}
+                          >
+                            <select
+                              value={matchAnswers[pair.id] || ""}
+                              onChange={e => setMatchAnswers(current => ({ ...current, [pair.id]: e.target.value }))}
+                              style={{ width: "100%" }}
+                            >
+                              <option value="" disabled>Select a match...</option>
+                              {matchRightOptions.map((opt, idx) => (
+                                <option key={idx} value={opt}>{opt}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </Fragment>
+                      ))}
+                    </div>
                   ) : null}
-                  <button onClick={submitAnswer} disabled={submitting || !studentAnswer} className="btn btn-primary" style={{ width: "100%" }}>
+                  <button
+                    onClick={submitAnswer}
+                    disabled={submitting || (isMatchType ? !matchComplete : !studentAnswer)}
+                    className="btn btn-primary"
+                    style={{ width: "100%" }}
+                  >
                     {submitting ? "Submitting..." : "Submit Answer"}
                   </button>
                 </>
@@ -142,7 +304,30 @@ export default function StudentPage() {
                 <>
                   <div className="answer-block">
                     <h3>Correct Answer</h3>
-                    <div className="answer-text">{selectedQuestion.correct_answer}</div>
+                    {isMatchType && Array.isArray(selectedQuestion.options) ? (
+                      <div
+                        className="answer-text"
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(120px, 1fr) minmax(160px, 1.4fr)",
+                          rowGap: "8px",
+                          columnGap: "16px",
+                        }}
+                      >
+                        {(() => {
+                          let correctMap: Record<string, string> = {};
+                          try { correctMap = JSON.parse(feedback.correct_answer || "{}"); } catch { correctMap = {}; }
+                          return (selectedQuestion.options as MatchPair[]).map(pair => (
+                            <Fragment key={pair.id}>
+                              <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{pair.left}</span>
+                              <span style={{ textAlign: "right" }}>{correctMap[pair.id] ?? pair.right}</span>
+                            </Fragment>
+                          ));
+                        })()}
+                      </div>
+                    ) : (
+                      <div className="answer-text">{feedback.correct_answer}</div>
+                    )}
                   </div>
                   {(feedback.explanation || selectedQuestion.explanation) && (
                     <div className="explanation-block">
@@ -150,10 +335,15 @@ export default function StudentPage() {
                       <p className="explanation-text">{feedback.explanation || selectedQuestion.explanation}</p>
                     </div>
                   )}
+                  {isMatchType && feedback.score !== null && (
+                    <p style={{ fontSize: "14px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
+                      Score: {feedback.score} / {selectedQuestion.points ?? 1}
+                    </p>
+                  )}
                   {feedback.is_correct !== null && (
                     <div style={{ padding: "12px 16px", borderRadius: "8px", backgroundColor: feedback.is_correct ? "var(--green-light)" : "var(--red-light)", borderLeft: `4px solid ${feedback.is_correct ? "var(--green)" : "var(--red)"}`, marginBottom: "16px" }}>
                       <p style={{ margin: "0", color: feedback.is_correct ? "var(--green)" : "var(--red)", fontWeight: "600" }}>
-                        {feedback.is_correct ? "✓ Correct!" : "✗ Incorrect"}
+                        {feedback.is_correct ? "✓ Correct!" : isMatchType ? "Partial credit awarded" : "✗ Incorrect"}
                       </p>
                     </div>
                   )}

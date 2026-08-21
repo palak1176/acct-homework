@@ -12,6 +12,7 @@ interface ProgressData {
   total_possible: number;
   by_chapter: Array<{
     chapter: number;
+    total: number;
     submitted: number;
     correct: number;
     score: number;
@@ -36,7 +37,7 @@ export default function Progress() {
       return;
     }
 
-    const { data: questions } = await supabase.from("questions_public").select("*");
+    const { data: questions } = await supabase.from("questions_public").select("*").order("chapter").order("order_index");
     if (!questions) {
       setLoading(false);
       return;
@@ -75,7 +76,7 @@ export default function Progress() {
         }
       });
 
-      by_chapter.push({ chapter: ch, submitted: ch_submitted, correct: ch_correct, score: ch_score, possible: ch_possible });
+      by_chapter.push({ chapter: ch, total: chQuestions.length, submitted: ch_submitted, correct: ch_correct, score: ch_score, possible: ch_possible });
       total_submitted += ch_submitted;
       total_correct += ch_correct;
       total_score += ch_score;
@@ -103,12 +104,14 @@ export default function Progress() {
     <div>
       <div className="page-header">
         <h1>
-          <span className="logo-mark">HW</span>
+          <span className="logo-mark">ACCT 2101</span>
           Progress
         </h1>
-        <Link href="/dashboard" className="btn btn-ghost-navy" style={{ padding: "8px 16px", fontSize: "14px" }}>
-          ← Back to Dashboard
-        </Link>
+        <div className="page-header-nav">
+          <Link href="/student" className="btn btn-ghost-navy" style={{ padding: "8px 16px", fontSize: "14px" }}>
+            ← Back to Homework
+          </Link>
+        </div>
       </div>
 
       <div className="container">
@@ -142,7 +145,7 @@ export default function Progress() {
             <div className="stat-number">{progress.total_questions}</div>
             <div className="stat-label">Total Questions</div>
             <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "8px 0 0 0" }}>
-              across 12 chapters
+              across {progress.by_chapter.length} chapter{progress.by_chapter.length === 1 ? "" : "s"}
             </p>
           </div>
         </div>
@@ -162,17 +165,17 @@ export default function Progress() {
             </thead>
             <tbody>
               {progress.by_chapter.map(ch => {
-                const chProgress = Math.round((ch.submitted / (progress.total_questions / 12)) * 100);
+                const chProgress = ch.total > 0 ? Math.round((ch.submitted / ch.total) * 100) : 0;
                 return (
                   <tr key={ch.chapter}>
                     <td><strong>Chapter {ch.chapter}</strong></td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <progress value={ch.submitted} max={progress.total_questions / 12} style={{ width: "80px" }} />
+                        <progress value={ch.submitted} max={ch.total} style={{ width: "80px" }} />
                         <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{chProgress}%</span>
                       </div>
                     </td>
-                    <td>{ch.submitted} / {Math.ceil(progress.total_questions / 12)}</td>
+                    <td>{ch.submitted} / {ch.total}</td>
                     <td style={{ color: ch.correct > 0 ? "var(--green)" : "var(--text-muted)" }}>{ch.correct}</td>
                     <td><strong>{ch.score} / {ch.possible}</strong></td>
                   </tr>
