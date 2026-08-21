@@ -1,10 +1,8 @@
 import "./globals.css";
-import { ServiceWorkerRegister } from "./ServiceWorkerRegister";
 import type { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
   title: "Homework Tracker",
-  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {
@@ -21,20 +19,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="app-shell">
           {children}
         </div>
-        <ServiceWorkerRegister />
       </body>
     </html>
   );
 }
-
-{/* 
-<script
-  dangerouslySetInnerHTML={{
-    __html: `
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
-      }
-    `,
-  }}
-/>
-*/}

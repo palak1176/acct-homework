@@ -21,7 +21,6 @@ Supabase (Postgres + Auth).
 8. [Running Locally](#running-locally)
 9. [Deployment to Vercel](#deployment-to-vercel)
 10. [Troubleshooting](#troubleshooting)
-11. [Known Gaps / Unused Pieces](#known-gaps--unused-pieces)
 
 ---
 
@@ -83,8 +82,7 @@ app/
 │   └── export/
 │       ├── csv/route.ts            Raw submissions CSV (TA-only)
 │       └── completion-csv/route.ts Per-student completion summary CSV (TA-only)
-├── globals.css                     All styling (CSS custom properties, no component library)
-└── ServiceWorkerRegister.tsx       Unregisters any previously-installed service worker on load
+└── globals.css                     All styling (CSS custom properties, no component library)
 
 lib/
 ├── types.ts                        Shared TypeScript interfaces (User, Question, Submission, MatchPair)
@@ -342,14 +340,3 @@ that the bucket allows the uploads/reads your policies need.
 
 **Settings → Environment Variables**, confirm values, then
 **Deployments → (latest) → Redeploy**.
-
----
-
-## Known Gaps / Unused Pieces
-
-- **`public/manifest.json` / `public/sw.js`** — PWA scaffolding exists, but
-  `app/ServiceWorkerRegister.tsx` actively **unregisters** any installed service
-  worker on load rather than registering one, so the app is not currently
-  installable/offline-capable. Left as-is intentionally; wire up
-  `ServiceWorkerRegister` to register `sw.js` if you want offline/installable
-  support.
