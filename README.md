@@ -1,404 +1,375 @@
-# Accounting Homework Tracker — MVP
+# Accounting Homework Tracker
 
-A full-stack web application for managing accounting homework. Teaching assistants post text questions organized by chapter; students submit answers and see instant feedback with correct answers and explanations.
+A full-stack web app for managing accounting homework. The instructor ("TA") creates
+chapter-organized questions of several types; students answer them and get feedback,
+either auto-graded or manually graded by the TA. Built on Next.js 16 (App Router) and
+Supabase (Postgres + Auth).
 
-**Tech Stack:** Next.js 16 • React 19 • Supabase • TypeScript • CSS Custom Properties
-
-**Design:** Playfair Display • Inter • JetBrains Mono • Navy/Gold color palette • 150ms animations
+**Tech stack:** Next.js 16 • React 19 • TypeScript • Supabase (Postgres, Auth, RLS) • plain CSS (custom properties in `app/globals.css`)
 
 ---
 
 ## Table of Contents
 
-1. [Design](#design)
-2. [Prerequisites](#prerequisites)
-3. [Local Setup](#local-setup)
-4. [Running Locally](#running-locally)
-5. [Testing](#testing)
-6. [Deployment to Vercel](#deployment-to-vercel)
-7. [Troubleshooting](#troubleshooting)
-8. [Features & Architecture](#features--architecture)
+1. [Features](#features)
+2. [Architecture](#architecture)
+3. [Prerequisites](#prerequisites)
+4. [Supabase Setup](#supabase-setup)
+5. [Google OAuth Setup](#google-oauth-setup)
+6. [Environment Variables](#environment-variables)
+7. [Provisioning Users & Roles](#provisioning-users--roles)
+8. [Running Locally](#running-locally)
+9. [Deployment to Vercel](#deployment-to-vercel)
+10. [Troubleshooting](#troubleshooting)
+11. [Known Gaps / Unused Pieces](#known-gaps--unused-pieces)
 
 ---
 
-## Design
+## Features
 
-The app features a modern, polished academic aesthetic with careful attention to typography and interaction.
+- **Google OAuth login** via Supabase Auth (PKCE flow), with role-based routing
+  (`/instructor` for TAs, `/student` for students). Unauthenticated or wrong-role
+  access is redirected by `proxy.ts` (Next's middleware) and by in-page checks.
+- **12 fixed chapters** for organizing questions.
+- **Multiple question types:** `text`, `multiple_choice`, `fill_blank`, `image`,
+  `matching` (a `labeling` type existed briefly and was merged into `matching`).
+- **Question scheduling:** `available_at` (opens) and `due_at` (closes) timestamps,
+  settable per-question or in bulk across a chapter from the instructor page.
+- **Drag-and-drop question reordering** within a chapter (persists to `order_index`).
+- **Attempt limits** (`max_attempts`) and **points** per question.
+- **Tagging** (`tags`) for questions.
+- **Image-upload questions:** students submit an `image_url` (uploaded to a Supabase
+  Storage bucket) as their answer.
+- **Auto-grading** for text/multiple-choice/fill-blank/matching answers, plus
+  **manual grading** by the TA (`is_correct`, `score`, `grader_note`) via
+  `PATCH /api/grade` — used for types that need human judgment (e.g. free-response).
+- **Re-submission:** students can edit and resubmit; `attempt_count` is tracked.
+- **Flagging:** students can flag their own submissions, TAs can flag any
+  (`PATCH /api/flag`) — e.g. to mark something for review.
+- **CSV export** for the TA: raw submissions (`/api/export/csv`) and a
+  per-student completion summary (`/api/export/completion-csv`).
+- **Analytics page** (`/analytics`, TA-only): KPI overview and per-question
+  performance breakdown.
+- **Progress page** (`/progress`, student-facing): per-chapter completion stats.
+- **Row-Level Security (RLS)** on every table — students can only see their own
+  submissions; only the TA role can create questions or read all submissions.
 
-### Visual Identity
-- **Color Palette:** Navy (#1a2e4a), Gold (#c9a227), Cream (#faf8f3), Surface (white)
-- **Headings:** Playfair Display (serif) — elegant, professional
-- **Body & UI:** Inter — clean, readable, accessible
-- **Code & Entries:** JetBrains Mono — monospace for accounting journal entries
-- **Shadows & Depth:** Subtle elevation on hover, 150ms smooth transitions
-- **Animations:** Card lift on hover, 200ms modal fade-in, no bounces
+### Not included
 
-### Pages
-- **Login:** Centered card with HW monogram, grid background texture
-- **Dashboard:** Sticky nav header, chapter filter tabs, question cards with left accent bars
-- **Progress:** Summary stat cards, chapter breakdown with progress bars
-- **Analytics:** KPI overview, performance tables with success rate visualizations
+- No automated tests.
+- No email notifications (the `resend` package and `RESEND_API_KEY`/`FROM_EMAIL`
+  env vars are present in `package.json`/`.env.example` but are not called
+  anywhere in the app — see [Known Gaps](#known-gaps--unused-pieces)).
+- No self-service signup flow — user accounts and roles are provisioned manually
+  (see [Provisioning Users & Roles](#provisioning-users--roles)).
 
-### Implementation
-Zero new dependencies—all styling via `app/globals.css` with CSS custom properties. Responsive design works on mobile/tablet/desktop.
+---
+
+## Architecture
+
+```
+app/
+├── page.tsx                        Root: checks session, redirects to /login, /instructor, or /student
+├── login/page.tsx                  "Continue with Google" (Supabase OAuth)
+├── auth/callback/route.ts          Exchanges OAuth code for a session, routes by role
+├── instructor/page.tsx             TA dashboard: create/edit/reorder/schedule questions, grade, flag, view submission counts
+├── student/page.tsx                Student view: answer questions by chapter, see feedback, edit/resubmit
+├── progress/page.tsx               Student-facing per-chapter completion stats
+├── analytics/page.tsx              TA-only KPI + per-question performance breakdown
+├── api/
+│   ├── questions/route.ts          GET/POST/PATCH/DELETE questions (TA-guarded for writes)
+│   ├── submit/route.ts             POST a student answer, runs auto-grading where applicable
+│   ├── submission-result/route.ts  GET a student's own result for a question
+│   ├── grade/route.ts              PATCH manual grade (TA-only)
+│   ├── flag/route.ts               PATCH flagged status
+│   └── export/
+│       ├── csv/route.ts            Raw submissions CSV (TA-only)
+│       └── completion-csv/route.ts Per-student completion summary CSV (TA-only)
+├── globals.css                     All styling (CSS custom properties, no component library)
+└── ServiceWorkerRegister.tsx       Unregisters any previously-installed service worker (see Known Gaps)
+
+lib/
+├── types.ts                        Shared TypeScript interfaces (User, Question, Submission, MatchPair)
+├── supabase-client.ts               Browser Supabase client (PKCE)
+├── supabase-server.ts                Server/route-handler Supabase client (cookie-based)
+└── supabase-proxy.ts                 Session refresh + role-gate logic used by proxy.ts
+
+proxy.ts                             Next 16 middleware entry point; matches /instructor/* and /student/*
+supabase/
+├── schema.sql                       Base schema + RLS policies (run first)
+├── add_available_at.sql             Adds available_at + fixes questions_public view (run after schema.sql)
+├── fix_questions_public_order_index.sql  Adds order_index back to questions_public (run after the above)
+├── add_matching_labeling_types.sql  Allows matching/labeling question types
+├── merge_labeling_into_matching.sql Collapses labeling into matching
+└── fix_ta_submissions_policy.sql    Grants + SECURITY DEFINER fix for TA-wide reads (see file for why)
+```
+
+### Auth & role model
+
+- Supabase Auth handles Google sign-in. There is **no database trigger that
+  auto-creates a `public.users` row** on signup — a row must exist in `users`
+  (with `role` set to `ta` or `student`) or the callback route redirects back
+  to `/login?error=user_not_setup`. See
+  [Provisioning Users & Roles](#provisioning-users--roles).
+- `NEXT_PUBLIC_TA_EMAIL` is defined in `.env.example` but **is not read anywhere
+  in the current codebase** — role assignment is manual, not automatic based on
+  this variable. Don't rely on setting it alone to grant TA access.
 
 ---
 
 ## Prerequisites
 
-- **Node.js 18+** ([download](https://nodejs.org/))
-- **npm** (comes with Node.js)
-- **Git** ([download](https://git-scm.com/))
-- **Supabase account** (free tier works) — https://supabase.com
-- **Google Cloud Project** with OAuth 2.0 credentials
-- **Vercel account** (for deployment) — https://vercel.com
+- **Node.js 18+**
+- **npm**
+- **Git**
+- A **Supabase** account (free tier is fine) — https://supabase.com
+- A **Google Cloud** project with OAuth 2.0 credentials
+- A **Vercel** account, for deployment — https://vercel.com
 
 ---
 
-## Local Setup
+## Supabase Setup
 
-### Step 1: Clone the Repository
+### 1. Create a project
+
+Go to https://supabase.com → **New Project** → pick a name, database password, and
+region → **Create**. Wait ~2 minutes for provisioning.
+
+### 2. Run the schema and migrations, in order
+
+Open **SQL Editor** → **New Query** in Supabase, and run each file from `supabase/`
+**in this exact order** (later files alter or replace what earlier ones create):
+
+1. `supabase/schema.sql`
+2. `supabase/add_available_at.sql`
+3. `supabase/fix_questions_public_order_index.sql`
+4. `supabase/add_matching_labeling_types.sql`
+5. `supabase/merge_labeling_into_matching.sql`
+6. `supabase/fix_ta_submissions_policy.sql`
+
+Verify in **Table Editor**: you should see `users`, `questions`, `submissions`,
+`question_images`, `study_groups`, `study_group_members`, and a `questions_public`
+view.
+
+> `question_images`, `study_groups`, and `study_group_members` are created by
+> `schema.sql` but aren't currently used by any app code — safe to ignore.
+
+### 3. Create a Storage bucket (for image questions)
+
+**Storage** → **New Bucket** → name it (default expected: `homework-images`, or
+whatever you set `NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET` to) → make it public (or
+add appropriate access policies) so uploaded `image_url`s are viewable. Skip this
+if you won't use `image`-type questions.
+
+### 4. Get your API credentials
+
+**Settings → API**, copy:
+- **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
+- **anon / public key** → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- **service_role key** (secret) → `SUPABASE_SERVICE_ROLE_KEY`
+
+**Never commit the service role key.**
+
+### 5. Enable Google as an Auth provider
+
+**Authentication → Providers → Google** → toggle on → paste in the Client ID and
+Client Secret from the Google Cloud project you'll create next → **Save**. Supabase
+will show you a callback URL (`https://<project-ref>.supabase.co/auth/v1/callback`)
+— you'll need it in the next step.
+
+---
+
+## Google OAuth Setup
+
+1. Go to https://console.cloud.google.com → create/select a project.
+2. **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+3. Application type: **Web application**.
+4. **Authorized redirect URIs**, add:
+   - The Supabase callback URL from the previous step
+     (`https://<project-ref>.supabase.co/auth/v1/callback`)
+5. **Create**, then copy the **Client ID** and **Client secret** into Supabase's
+   Google provider settings (previous section).
+
+> Note: the app's own `/auth/callback` route (`app/auth/callback/route.ts`)
+> receives the code *after* Supabase completes the OAuth handshake — it is not
+> the redirect URI you register with Google. Only the Supabase callback URL
+> goes in Google Cloud Console.
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env.local`:
 
 ```bash
-git clone https://github.com/anvitdivekar/homework-tracker.git
-cd homework-tracker
-npm install
+cp .env.example .env.local
 ```
 
-### Step 2: Create Supabase Project
+| Variable | Required | Used for |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon key (client + server) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only privileged Supabase key |
+| `NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET` | Only if using image questions | Storage bucket name for uploaded answer images |
+| `NEXT_PUBLIC_TA_EMAIL` | No | Present for reference only — **not read by the app**; role assignment is manual |
+| `RESEND_API_KEY`, `FROM_EMAIL` | No | Present for a future email feature — **not currently used anywhere in the app** |
 
-1. Go to https://supabase.com and sign in
-2. Click **"New Project"**
-3. Fill in:
-   - **Name:** `homework-tracker` (or any name)
-   - **Database Password:** Choose a strong password (save it)
-   - **Region:** Pick closest to you
-4. Click **Create New Project** (takes ~2 minutes)
+`.env.local` is gitignored — verify before committing anything.
 
-Once ready, you'll see your project dashboard.
+---
 
-### Step 3: Set Up Database Schema
+## Provisioning Users & Roles
 
-1. In Supabase, go to **SQL Editor** (left sidebar)
-2. Click **New Query**
-3. Open `supabase/schema.sql` from this repo
-4. Copy the entire SQL content into the editor
-5. Click **Run**
-6. Verify: tables `users`, `questions`, `submissions` appear in **Table Editor**
+Because there's no signup trigger, get each person into the system like this:
 
-**Expected output:**
-```
-CREATE TABLE (success)
-ALTER TABLE (success) — for each RLS policy
-CREATE INDEX (success) — for each index
-```
-
-### Step 4: Get Supabase Credentials
-
-1. In Supabase, go to **Settings** (bottom left)
-2. Click **API**
-3. Copy and save these (you'll need them):
-   - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
-   - **Anon Key** (public) → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - **Service Role Key** (secret!) → `SUPABASE_SERVICE_ROLE_KEY`
-
-**⚠️ Never commit `SUPABASE_SERVICE_ROLE_KEY` to git.**
-
-### Step 5: Register Google OAuth
-
-1. Go to https://console.cloud.google.com
-2. Create a new project (top left, project dropdown)
-3. Go to **APIs & Services** → **Credentials**
-4. Click **Create Credentials** → **OAuth 2.0 Client ID**
-5. Choose **Web application**
-6. Under **Authorized redirect URIs**, add:
-   - `http://localhost:3000/auth/callback` (local dev)
-   - `https://your-deployed-domain.vercel.app/auth/callback` (after you deploy, come back and add this)
-7. Click **Create**
-8. Download the JSON and save your **Client ID** and **Client Secret**
-
-### Step 6: Configure Environment Variables
-
-1. Copy `.env.example` to `.env.local`:
-   ```bash
-   cp .env.example .env.local
+1. Have the person sign in once at `/login` with **Continue with Google**. This
+   creates their row in Supabase's internal `auth.users` table (you'll see them
+   under **Authentication → Users**), but sign-in will fail with
+   `user_not_setup` because they have no `public.users` row yet.
+2. Copy their `auth.users` **UID** and email from the Supabase Authentication tab.
+3. In **Table Editor** (or SQL Editor), insert a row into `public.users`:
+   ```sql
+   insert into public.users (id, email, name, role)
+   values ('<uid-from-auth.users>', 'someone@example.com', 'Someone', 'ta');
+   -- use role = 'student' for students
    ```
+4. Have them sign in again (or refresh) — they'll now land on `/instructor` or
+   `/student` per their role.
 
-2. Edit `.env.local` and fill in:
-   ```env
-   NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGc...
-   SUPABASE_SERVICE_ROLE_KEY=eyJhbGc...
-   NEXT_PUBLIC_TA_EMAIL=yourteacheremail@example.com
-   ```
-
-   - Replace `yourteacheremail@example.com` with the email you'll use to sign in as TA
-   - This email will automatically be assigned the `ta` role
-   - All other emails will be assigned `student` role
-
-3. **Verify `.env.local` is in `.gitignore`** (it should be — never commit secrets)
+Repeat step 3 with `role = 'student'` for each student.
 
 ---
 
 ## Running Locally
 
-### Start the Development Server
-
 ```bash
+npm install
 npm run dev
 ```
 
-You'll see:
-```
-> next dev
-▲ Next.js 16.x.x
-- Local: http://localhost:3000
-```
+Visit http://localhost:3000. It redirects to `/login` if you have no session, or
+to `/instructor`/`/student` based on your role once signed in.
 
-### Test the App
+### Manual test checklist
 
-1. Open http://localhost:3000 in your browser
-2. Click **Sign in with Google**
-3. Use your TA email (from `.env.local`) to sign in
-4. You'll land on the dashboard as a **TA**
-
-### As TA (Your Account)
-
-1. You'll see a **"Create Question"** form
-2. Fill in:
-   - **Title:** "Journal Entry Practice"
-   - **Prompt:** "Record the following transaction: Received $1000 cash from customer"
-   - **Correct Answer:** "Debit Cash 1000, Credit Revenue 1000"
-   - **Chapter:** 1
-3. Click **Create**
-4. The question appears in the list below
-
-### As Student (Different Email)
-
-1. Open an **Incognito/Private** browser window
-2. Visit http://localhost:3000 again
-3. Sign in with a **different Google account** (not your TA email)
-4. You'll see the **"Homework"** page (student view)
-5. Click on your question
-6. Enter an answer, click **Submit**
-7. The correct answer and explanation are revealed
-
-### Verify RLS & Permissions
-
-- **Students cannot see other students' answers** (RLS policies enforce this)
-- **Students cannot create questions** (only TA can)
-- **TA can see all submissions** from the dashboard
-
----
-
-## Testing
-
-### Checklist
-
-- [ ] Google OAuth login works
-- [ ] TA email auto-assigned `ta` role
-- [ ] Other emails auto-assigned `student` role
-- [ ] TA can create questions
-- [ ] Questions appear in student view
-- [ ] Students can submit answers
-- [ ] Answer reveal shows correct answer
-- [ ] Can edit answer and resubmit
-- [ ] Logout works, redirects to login
-
-### Manual Testing Workflow
+- [ ] Google sign-in works and lands on the correct role's page
+- [ ] TA can create a question of each type (text, multiple choice, fill-blank,
+      image, matching)
+- [ ] TA can drag-reorder questions within a chapter
+- [ ] TA can set `available_at`/`due_at` on a question (individually and in bulk)
+- [ ] Student sees only questions that are currently available
+- [ ] Student can submit an answer, sees feedback, can edit and resubmit
+- [ ] Student and TA can flag a submission
+- [ ] TA can manually grade a submission and it reflects on the student's side
+- [ ] TA can export both CSVs from `/analytics`
+- [ ] `/progress` shows correct per-chapter completion for a student
+- [ ] A student cannot reach `/instructor` (redirected by `proxy.ts`)
 
 ```bash
-# Terminal 1: Run dev server
-npm run dev
-
-# Terminal 2: Check for TypeScript errors (optional)
+# Optional: type-check
 npx tsc --noEmit
-
-# Test in browser as shown above
 ```
 
 ---
 
 ## Deployment to Vercel
 
-### Step 1: Prepare for Deployment
+### 1. Push to GitHub
 
-1. Push code to GitHub (already done if cloned from repo):
-   ```bash
-   git add .
-   git commit -m "ready for deployment"
-   git push origin main
-   ```
-
-2. Go to https://vercel.com and sign in
-
-### Step 2: Import Project to Vercel
-
-1. Click **Add New** → **Project**
-2. Choose **Import Git Repository**
-3. Select `homework-tracker` repo
-4. Click **Import**
-
-### Step 3: Add Environment Variables
-
-1. In Vercel, you'll see **Environment Variables** section
-2. Add these (same values as `.env.local`):
-   ```
-   NEXT_PUBLIC_SUPABASE_URL = https://xxxxx.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY = eyJhbGc...
-   SUPABASE_SERVICE_ROLE_KEY = eyJhbGc...
-   NEXT_PUBLIC_TA_EMAIL = yourteacheremail@example.com
-   ```
-
-3. Click **Deploy**
-
-Vercel will build and deploy. Once complete, you'll see a URL like:
-```
-https://homework-tracker-xxxxx.vercel.app
+```bash
+git add .
+git commit -m "ready for deployment"
+git push origin main
 ```
 
-### Step 4: Update Google OAuth Redirect URI
+### 2. Import into Vercel
 
-1. Go back to Google Cloud Console
-2. Go to **Credentials** → your OAuth client
-3. Under **Authorized redirect URIs**, add:
-   ```
-   https://homework-tracker-xxxxx.vercel.app/auth/callback
-   ```
-   (replace with your actual Vercel domain)
-4. Click **Save**
+**Add New → Project → Import Git Repository** → select this repo → **Import**.
+Vercel auto-detects Next.js; no build command changes are needed.
 
-### Step 5: Test Production
+### 3. Add environment variables
 
-1. Visit your deployed URL
-2. Try signing in with Google
-3. Verify TA and student flows work
-4. Share the URL with users
+In the project's **Settings → Environment Variables**, add the same variables
+from your `.env.local` (see [Environment Variables](#environment-variables)) for
+Production (and Preview, if you want preview deployments to work against the
+same Supabase project). Then **Deploy**.
+
+### 4. No redirect URI changes needed for new domains
+
+Because Google OAuth is configured against Supabase's fixed callback URL (not
+your app's domain), a new Vercel deployment domain does **not** require any
+changes in Google Cloud Console. If you add a **custom domain** in Vercel, no
+Google/Supabase config changes are needed either — only your app's own
+`redirectTo` (already computed from `window.location.origin` in
+`app/login/page.tsx`) needs the domain to be reachable, which it is automatically.
+
+### 5. Test production
+
+Visit the deployed URL, sign in, and run through the checklist above.
 
 ---
 
 ## Troubleshooting
 
-### "Sign in with Google" button doesn't work
+### Stuck on `/login?error=user_not_setup`
 
-**Causes:**
-- Google OAuth not configured correctly
-- Redirect URI not added to Google Cloud Console
-- `.env.local` variables not set
+No `public.users` row exists for this account yet. See
+[Provisioning Users & Roles](#provisioning-users--roles).
 
-**Fix:**
-1. Verify `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are correct
-2. Check Google Cloud Console → OAuth 2.0 Client ID → **Authorized redirect URIs**
-3. Restart dev server: `Ctrl+C`, then `npm run dev`
+### `/login?error=missing_code` or `auth_failed`
 
-### Database errors when creating a question
+The OAuth handshake didn't complete. Check that Google is enabled as a provider
+in Supabase (**Authentication → Providers**) and that the Supabase callback URL
+is registered in Google Cloud Console's **Authorized redirect URIs**.
 
-**Cause:** Supabase schema not set up
+### Database errors creating/reading questions
 
-**Fix:**
-1. Go to Supabase SQL Editor
-2. Copy `supabase/schema.sql`
-3. Run it to create tables
-4. Restart dev server
+Confirm all six SQL files under `supabase/` were run, **in order** (see
+[Supabase Setup](#supabase-setup)). Running them out of order can leave
+`questions_public` missing columns the app expects (`order_index`,
+`available_at`, `explanation`).
 
-### "RLS policy X does not allow X operation"
+### `permission denied for table submissions` (Postgres code 42501) on `/analytics`
 
-**Cause:** Role not assigned correctly, or permission mismatch
+This is a table-privilege issue, not RLS — make sure
+`supabase/fix_ta_submissions_policy.sql` was run; it grants base `SELECT` on
+`submissions` to the `authenticated` role (RLS policies alone aren't enough
+without this grant).
 
-**Fix:**
-1. Check your email matches `NEXT_PUBLIC_TA_EMAIL` (for TA access)
-2. Verify RLS policies were created: Supabase → **Auth** → **Policies**
-3. All rows should show "Enable" and policy names like "Only TA can insert"
+### Analytics shows 0 active students
 
-### Getting "Invalid token" errors after deployment
+Same fix as above — `fix_ta_submissions_policy.sql` also adds a
+`SECURITY DEFINER` `is_ta()` function so TA-wide reads on `users` work without
+triggering RLS recursion.
 
-**Cause:** Environment variables not synced to Vercel
+### Image questions fail to submit
 
-**Fix:**
-1. Go to Vercel project → **Settings** → **Environment Variables**
-2. Verify all 4 variables are set and correct
-3. Redeploy: click **Deployments** → **Latest** → **Redeploy**
+Confirm `NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET` matches an actual bucket name and
+that the bucket allows the uploads/reads your policies need.
 
-### Can't edit answer as student
+### Environment variable changes not taking effect on Vercel
 
-**Cause:** Modal not closing after first submission
-
-**Fix:**
-1. Refresh the page
-2. Resubmit the question
-3. Click **Edit** button in the reveal panel
+**Settings → Environment Variables**, confirm values, then
+**Deployments → (latest) → Redeploy**.
 
 ---
 
-## Features & Architecture
+## Known Gaps / Unused Pieces
 
-### What's Included (MVP)
+Worth knowing if you extend this app — these exist in the repo but aren't wired up:
 
-- ✅ **Google OAuth login** with automatic role assignment
-- ✅ **12 chapters** (fixed, hardcoded)
-- ✅ **Text questions only** (TA creates, students answer)
-- ✅ **Answer reveal** with correct answer + explanation
-- ✅ **Re-submission** (edit answer and submit again)
-- ✅ **Row-Level Security (RLS)** on all database tables
-- ✅ **Role-based access** (TA vs. Student)
-
-### What's NOT Included (Future)
-
-- ❌ Multiple choice questions
-- ❌ Table/structured questions
-- ❌ Screenshot import with AI parsing
-- ❌ Email notifications
-- ❌ Analytics & performance tracking
-- ❌ Fancy UI design (minimal MVP styling)
-- ❌ Admin dashboard for role management
-
-### Architecture
-
-```
-├── app/
-│   ├── layout.tsx               Root layout
-│   ├── page.tsx                 Redirect to login/dashboard
-│   ├── login/page.tsx           Google OAuth entry
-│   ├── auth/callback/route.ts   OAuth callback handler
-│   └── dashboard/page.tsx       Main app (TA + Student views)
-├── lib/
-│   ├── types.ts                 TypeScript interfaces
-│   ├── supabase-client.ts       Browser client
-│   └── supabase-server.ts       Server-side client
-├── supabase/
-│   └── schema.sql               Database schema + RLS
-└── README.md                    This file
-```
-
-### Security
-
-- **Secrets never in git:** `.env.local` is gitignored
-- **RLS enforces permissions:** Database-level access control
-- **Service role key server-only:** Never exposed to browser
-- **Google OAuth:** Verified sign-in, no manual email input
-
----
-
-## Support & Next Steps
-
-### Immediate
-
-1. Follow steps above to run locally
-2. Test as TA and student
-3. Deploy to Vercel
-4. Share URL with your class
-
-### Enhancement Ideas
-
-- Add multiple-choice questions
-- Add table/grid questions (categorization, matching)
-- Screenshot import with AI parsing
-- Email reminders for due dates
-- Analytics dashboard
-- Dark mode
-
----
-
-**Questions?** Check the [troubleshooting](#troubleshooting) section or review the code in `app/dashboard/page.tsx` (main app logic).
-
-**Built with:** Next.js 16, React 19, Supabase, TypeScript
+- **`resend` package / `RESEND_API_KEY` / `FROM_EMAIL`** — dependency and env vars
+  are present, but no code sends email anywhere.
+- **`NEXT_PUBLIC_TA_EMAIL`** — not read by the app; doesn't auto-assign the `ta`
+  role. Role assignment is manual (see above).
+- **`public/manifest.json` / `public/sw.js`** — PWA scaffolding exists, but
+  `app/ServiceWorkerRegister.tsx` actively **unregisters** any installed service
+  worker on load rather than registering one, so the app is not currently
+  installable/offline-capable.
+- **`tailwindcss`, `postcss`, `autoprefixer`** — listed as dependencies, but there
+  is no `tailwind.config`/`postcss.config` and no Tailwind classes in use. All
+  styling is plain CSS in `app/globals.css`.
+- **`question_images`, `study_groups`, `study_group_members` tables** — created
+  by `schema.sql`, not referenced by any current app code.
+- **`time_limit_sec`, `difficulty` columns** on `questions` — exist in the schema
+  and `questions_public` view, but no UI currently sets or displays them.
