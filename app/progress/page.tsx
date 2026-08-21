@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase-client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import type { Question, Submission } from "@/lib/types";
 
 interface ProgressData {
   total_questions: number;
@@ -37,17 +38,19 @@ export default function Progress() {
       return;
     }
 
-    const { data: questions } = await supabase.from("questions_public").select("*").order("chapter").order("order_index");
-    if (!questions) {
+    const { data: questionsData } = await supabase.from("questions_public").select("*").order("chapter").order("order_index");
+    if (!questionsData) {
       setLoading(false);
       return;
     }
+    const questions = questionsData as Question[];
 
-    const { data: submissions } = await supabase.from("submissions").select("*").eq("user_id", user.id);
-    if (!submissions) {
+    const { data: submissionsData } = await supabase.from("submissions").select("*").eq("user_id", user.id);
+    if (!submissionsData) {
       setLoading(false);
       return;
     }
+    const submissions = submissionsData as Submission[];
 
     const subMap = new Map(submissions.map(s => [s.question_id, s]));
     const by_chapter: ProgressData["by_chapter"] = [];
@@ -72,7 +75,7 @@ export default function Progress() {
         if (sub) {
           ch_submitted++;
           if (sub.is_correct) ch_correct++;
-          if (sub.score !== null) ch_score += sub.score;
+          if (sub.score != null) ch_score += sub.score;
         }
       });
 
