@@ -1,7 +1,9 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const { question_id, answer, image_url } = await req.json();
     if (!question_id || !answer) {
@@ -13,6 +15,7 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     // Fetch question + check due date
     const { data: question, error: qError } = await supabase
@@ -97,6 +100,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (sError) {
+      await notifyTAOfError({ route: "POST /api/submit", userEmail, message: sError.message });
       return NextResponse.json({ error: sError.message }, { status: 500 });
     }
 
@@ -108,6 +112,7 @@ export async function POST(req: NextRequest) {
       message: is_correct ? "Correct!" : is_correct === false ? "Incorrect" : "Submitted for manual grading",
     });
   } catch (e: any) {
+    await notifyTAOfError({ route: "POST /api/submit", userEmail, message: e.message });
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

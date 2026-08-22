@@ -1,7 +1,9 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const {
       chapter,
@@ -31,6 +33,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    userEmail = user.email ?? null;
     console.log("[QUESTIONS AUTH] user id:", user.id);
     console.log("[QUESTIONS AUTH] user email:", user.email);
 
@@ -86,6 +89,7 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       console.error("[QUESTIONS] Insert failed:", error);
+      await notifyTAOfError({ route: "POST /api/questions", userEmail, message: error.message });
 
       return NextResponse.json(
         { error: error.message },
@@ -101,6 +105,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     console.error("[QUESTIONS] Unexpected error:", e);
+    await notifyTAOfError({ route: "POST /api/questions", userEmail, message: e.message || "Unknown error" });
 
     return NextResponse.json(
       { error: e.message || "Unknown error" },
@@ -110,6 +115,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const {
       id,
@@ -139,6 +145,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
+    userEmail = user.email ?? null;
     console.log("[QUESTIONS PATCH] user id:", user.id);
     console.log("[QUESTIONS PATCH] user email:", user.email);
 
@@ -179,6 +186,7 @@ export async function PATCH(req: NextRequest) {
 
     if (error) {
       console.error("[QUESTIONS PATCH] Update failed:", error);
+      await notifyTAOfError({ route: "PATCH /api/questions", userEmail, message: error.message });
 
       return NextResponse.json(
         { error: error.message },
@@ -192,6 +200,7 @@ export async function PATCH(req: NextRequest) {
     });
   } catch (e: any) {
     console.error("[QUESTIONS PATCH] Unexpected error:", e);
+    await notifyTAOfError({ route: "PATCH /api/questions", userEmail, message: e.message || "Unknown error" });
 
     return NextResponse.json(
       { error: e.message || "Unknown error" },
@@ -201,6 +210,7 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
@@ -221,6 +231,7 @@ export async function DELETE(req: NextRequest) {
       error: authError,
     } = await supabase.auth.getUser();
 
+    userEmail = user?.email ?? null;
     console.log("[QUESTIONS DELETE] User:", user?.email);
     console.log("[QUESTIONS DELETE] Auth error:", authError);
 
@@ -267,6 +278,7 @@ export async function DELETE(req: NextRequest) {
     );
 
     if (deleteError) {
+      await notifyTAOfError({ route: "DELETE /api/questions", userEmail, message: deleteError.message });
       return NextResponse.json(
         { error: deleteError.message },
         { status: 500 }
@@ -286,15 +298,9 @@ export async function DELETE(req: NextRequest) {
     });
   } catch (e) {
     console.error("[QUESTIONS DELETE] Unexpected error:", e);
+    const message = e instanceof Error ? e.message : "Unexpected server error";
+    await notifyTAOfError({ route: "DELETE /api/questions", userEmail, message });
 
-    return NextResponse.json(
-      {
-        error:
-          e instanceof Error
-            ? e.message
-            : "Unexpected server error",
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

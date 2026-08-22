@@ -1,13 +1,16 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const supabase = await createServerSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     const { data: userRow } = await supabase.from("users").select("role").eq("id", user.id).single();
     if (!userRow || userRow.role !== "ta") {
@@ -21,6 +24,7 @@ export async function GET(req: NextRequest) {
       .order("name");
 
     if (studentsError) {
+      await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: studentsError.message });
       return NextResponse.json({ error: studentsError.message }, { status: 500 });
     }
 
@@ -29,6 +33,7 @@ export async function GET(req: NextRequest) {
       .select("id, chapter");
 
     if (questionsError) {
+      await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: questionsError.message });
       return NextResponse.json({ error: questionsError.message }, { status: 500 });
     }
 
@@ -37,6 +42,7 @@ export async function GET(req: NextRequest) {
       .select("user_id, question_id");
 
     if (submissionsError) {
+      await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: submissionsError.message });
       return NextResponse.json({ error: submissionsError.message }, { status: 500 });
     }
 
@@ -82,6 +88,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e: any) {
+    await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: e.message });
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

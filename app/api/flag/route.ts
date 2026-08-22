@@ -1,7 +1,9 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function PATCH(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const { submission_id, flagged } = await req.json();
     if (!submission_id) {
@@ -13,6 +15,7 @@ export async function PATCH(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     // Students can only flag their own, TAs can flag any
     const { data: submission } = await supabase.from("submissions").select("user_id").eq("id", submission_id).single();
@@ -37,11 +40,13 @@ export async function PATCH(req: NextRequest) {
       .single();
 
     if (error) {
+      await notifyTAOfError({ route: "PATCH /api/flag", userEmail, message: error.message });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, data });
   } catch (e: any) {
+    await notifyTAOfError({ route: "PATCH /api/flag", userEmail, message: e.message });
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

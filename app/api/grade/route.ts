@@ -1,7 +1,9 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function PATCH(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const { submission_id, is_correct, score, grader_note } = await req.json();
     if (!submission_id) {
@@ -13,6 +15,7 @@ export async function PATCH(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     // Verify user is TA
     const { data: userRow } = await supabase.from("users").select("role").eq("id", user.id).single();
@@ -34,11 +37,13 @@ export async function PATCH(req: NextRequest) {
       .single();
 
     if (error) {
+      await notifyTAOfError({ route: "PATCH /api/grade", userEmail, message: error.message });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, data });
   } catch (e: any) {
+    await notifyTAOfError({ route: "PATCH /api/grade", userEmail, message: e.message });
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

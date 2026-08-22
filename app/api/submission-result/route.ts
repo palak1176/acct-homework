@@ -1,7 +1,9 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
+  let userEmail: string | null = null;
   try {
     const { searchParams } = new URL(req.url);
     const question_id = searchParams.get("question_id");
@@ -15,6 +17,7 @@ export async function GET(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    userEmail = user.email ?? null;
 
     // Only reveal the result if this user has actually submitted this question
     const { data: submission } = await supabase
@@ -45,6 +48,7 @@ export async function GET(req: NextRequest) {
       explanation: question.explanation,
     });
   } catch (e: any) {
+    await notifyTAOfError({ route: "GET /api/submission-result", userEmail, message: e.message });
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }

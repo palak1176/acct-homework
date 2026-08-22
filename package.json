@@ -22,5 +22,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "resend": "^6.19.0"
   }
 }

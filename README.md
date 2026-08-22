@@ -18,9 +18,10 @@ Supabase (Postgres + Auth).
 5. [Google OAuth Setup](#google-oauth-setup)
 6. [Environment Variables](#environment-variables)
 7. [Provisioning Users & Roles](#provisioning-users--roles)
-8. [Running Locally](#running-locally)
-9. [Deployment to Vercel](#deployment-to-vercel)
-10. [Troubleshooting](#troubleshooting)
+8. [Email Notifications (Resend)](#email-notifications-resend)
+9. [Running Locally](#running-locally)
+10. [Deployment to Vercel](#deployment-to-vercel)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -52,11 +53,14 @@ Supabase (Postgres + Auth).
 - **Progress page** (`/progress`, student-facing): per-chapter completion stats.
 - **Row-Level Security (RLS)** on every table — students can only see their own
   submissions; only the TA role can create questions or read all submissions.
+- **Email notifications via Resend** (optional, off by default): a daily
+  scheduled job emails students their unanswered questions due within 24
+  hours, and every API route emails the TA when a request fails server-side.
+  See [Email Notifications (Resend)](#email-notifications-resend).
 
 ### Not included
 
 - No automated tests.
-- No email notifications.
 - No self-service signup flow — user accounts and roles are provisioned manually
   (see [Provisioning Users & Roles](#provisioning-users--roles)).
 
@@ -79,18 +83,24 @@ app/
 │   ├── submission-result/route.ts  GET a student's own result for a question
 │   ├── grade/route.ts              PATCH manual grade (TA-only)
 │   ├── flag/route.ts               PATCH flagged status
-│   └── export/
-│       ├── csv/route.ts            Raw submissions CSV (TA-only)
-│       └── completion-csv/route.ts Per-student completion summary CSV (TA-only)
+│   ├── export/
+│   │   ├── csv/route.ts            Raw submissions CSV (TA-only)
+│   │   └── completion-csv/route.ts Per-student completion summary CSV (TA-only)
+│   └── cron/
+│       └── due-reminders/route.ts  Vercel Cron target: emails students their questions due within 24h
 └── globals.css                     All styling (CSS custom properties, no component library)
 
 lib/
 ├── types.ts                        Shared TypeScript interfaces (User, Question, Submission, MatchPair)
 ├── supabase-client.ts               Browser Supabase client (PKCE)
 ├── supabase-server.ts                Server/route-handler Supabase client (cookie-based)
-└── supabase-proxy.ts                 Session refresh + role-gate logic used by proxy.ts
+├── supabase-proxy.ts                 Session refresh + role-gate logic used by proxy.ts
+├── supabase-admin.ts                  Service-role Supabase client for cron + cross-user error notifications
+├── resend.ts                          Resend wrapper; no-ops with a warning if RESEND_API_KEY/FROM_EMAIL are unset
+└── notify-ta.ts                       Emails every TA when an API route hits a server error
 
 proxy.ts                             Next 16 middleware entry point; matches /instructor/* and /student/*
+vercel.json                          Vercel Cron schedule for /api/cron/due-reminders
 supabase/
 ├── schema.sql                       Base schema + RLS policies (run first)
 ├── add_available_at.sql             Adds available_at + fixes questions_public view (run after schema.sql)
@@ -98,7 +108,8 @@ supabase/
 ├── add_matching_labeling_types.sql  Allows matching/labeling question types
 ├── merge_labeling_into_matching.sql Collapses labeling into matching
 ├── fix_ta_submissions_policy.sql    Grants + SECURITY DEFINER fix for TA-wide reads (see file for why)
-└── drop_unused.sql                  Drops unused tables/columns (question_images, study_groups, study_group_members, time_limit_sec, difficulty)
+├── drop_unused.sql                  Drops unused tables/columns (question_images, study_groups, study_group_members, time_limit_sec, difficulty)
+└── grant_service_role.sql           Grants service_role base table privileges (needed for the cron job + error notifications)
 ```
 
 ### Auth & role model
@@ -141,6 +152,7 @@ Open **SQL Editor** → **New Query** in Supabase, and run each file from `supab
 5. `supabase/merge_labeling_into_matching.sql`
 6. `supabase/fix_ta_submissions_policy.sql`
 7. `supabase/drop_unused.sql`
+8. `supabase/grant_service_role.sql`
 
 Verify in **Table Editor**: you should see `users`, `questions`, `submissions`,
 and a `questions_public` view.
@@ -202,6 +214,10 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon key (client + server) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-only privileged Supabase key |
 | `NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET` | Only if using image questions | Storage bucket name for uploaded answer images |
+| `RESEND_API_KEY` | Only for email notifications | Resend API key |
+| `FROM_EMAIL` | Only for email notifications | Verified sender, e.g. `Homework Tracker <onboarding@resend.dev>` |
+| `APP_URL` | Only for email notifications | Used to build the "Go to your homework" link in reminder emails |
+| `CRON_SECRET` | Only for email notifications | Shared secret Vercel Cron sends as `Authorization: Bearer <value>`; the cron route rejects requests without it |
 
 `.env.local` is gitignored — verify before committing anything.
 
@@ -226,6 +242,88 @@ Because there's no signup trigger, get each person into the system like this:
    `/student` per their role.
 
 Repeat step 3 with `role = 'student'` for each student.
+
+---
+
+## Email Notifications (Resend)
+
+Optional. Two things send email once configured:
+- **Due-date reminders** — a daily job emails each student their unanswered
+  questions due within the next 24 hours (`app/api/cron/due-reminders/route.ts`).
+- **TA error alerts** — every API route emails all `ta`-role users when a
+  request fails server-side (`lib/notify-ta.ts`), so grading/submission bugs
+  get noticed without a student having to report them.
+
+Without `RESEND_API_KEY`/`FROM_EMAIL` set, `lib/resend.ts` no-ops (logs a
+warning instead of sending) — the app runs fine with email fully disabled.
+
+### 1. Create a Resend account and get an API key
+
+1. Sign up at https://resend.com.
+2. **API Keys** → **Create API Key** → copy it into `RESEND_API_KEY`.
+3. For a sender address: either verify your own domain under **Domains** (for
+   production use), or use Resend's shared test domain
+   `onboarding@resend.dev` as `FROM_EMAIL` to get started immediately — note
+   the test domain only delivers to the email address you signed up with, so
+   verify a real domain before relying on this for actual students.
+
+### 2. Grant `service_role` table access
+
+The cron job and error notifications run without a logged-in user, so they
+use the service-role admin client (`lib/supabase-admin.ts`), which needs base
+table privileges independent of RLS. Run `supabase/grant_service_role.sql`
+(step 8 in [Supabase Setup](#supabase-setup)) if you haven't already —
+without it you'll see `permission denied for table questions` (Postgres code
+42501) the moment the cron route or an error-notification runs.
+
+### 3. Set environment variables
+
+Add to `.env.local` (and to Vercel's env vars for production — see
+[Deployment to Vercel](#deployment-to-vercel)):
+
+```env
+RESEND_API_KEY=re_your_key
+FROM_EMAIL=Homework Tracker <onboarding@resend.dev>
+APP_URL=http://localhost:3000
+CRON_SECRET=some-long-random-string
+```
+
+`APP_URL` should be your production URL once deployed (e.g.
+`https://your-app.vercel.app`) — it's just used to build the link inside
+reminder emails, not for auth. `CRON_SECRET` can be anything long and random;
+generate one with `openssl rand -hex 32` or similar.
+
+### 4. Enable the scheduled job on Vercel
+
+`vercel.json` already defines the cron schedule:
+
+```json
+{ "crons": [{ "path": "/api/cron/due-reminders", "schedule": "0 13 * * *" }] }
+```
+
+Vercel automatically signs cron requests with `Authorization: Bearer
+<CRON_SECRET>` when a `CRON_SECRET` env var is set on the project — the route
+checks that header itself, so no other setup is needed once the env var is
+in place. Cron only runs on deployed (production) environments, not locally.
+
+> **Hobby plan note:** Vercel's free tier limits cron jobs to once per day.
+> `0 13 * * *` (13:00 UTC daily) already respects that; if you're on a paid
+> plan and want more frequent reminders, you can tighten the schedule.
+
+### 5. Test locally
+
+The cron route can be hit directly for testing (it doesn't require Vercel's
+scheduler, just the right header):
+
+```bash
+curl http://localhost:3000/api/cron/due-reminders \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+
+To test TA error alerts, trigger any of the app's error paths (e.g. submit
+with bad data) and confirm an email arrives, or watch the server log for
+`[EMAIL] RESEND_API_KEY or FROM_EMAIL not set, skipping send` if it's not
+configured yet.
 
 ---
 
@@ -281,7 +379,9 @@ Vercel auto-detects Next.js; no build command changes are needed.
 In the project's **Settings → Environment Variables**, add the same variables
 from your `.env.local` (see [Environment Variables](#environment-variables)) for
 Production (and Preview, if you want preview deployments to work against the
-same Supabase project). Then **Deploy**.
+same Supabase project). Include the Resend variables if you're using email
+notifications (see [Email Notifications (Resend)](#email-notifications-resend)),
+and set `APP_URL` to your actual Vercel URL rather than localhost. Then **Deploy**.
 
 ### 4. No Google Cloud Console changes needed for new domains
 
@@ -366,6 +466,12 @@ without this grant).
 Same fix as above — `fix_ta_submissions_policy.sql` also adds a
 `SECURITY DEFINER` `is_ta()` function so TA-wide reads on `users` work without
 triggering RLS recursion.
+
+### `permission denied for table questions/submissions/users` (Postgres code 42501) from the cron job or error emails
+
+The `service_role` key used by `lib/supabase-admin.ts` bypasses RLS but still
+needs base table privileges, same underlying issue as the `authenticated`-role
+fix above. Run `supabase/grant_service_role.sql`.
 
 ### Image questions fail to submit
 
