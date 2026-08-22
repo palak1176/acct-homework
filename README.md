@@ -283,18 +283,36 @@ from your `.env.local` (see [Environment Variables](#environment-variables)) for
 Production (and Preview, if you want preview deployments to work against the
 same Supabase project). Then **Deploy**.
 
-### 4. No redirect URI changes needed for new domains
+### 4. No Google Cloud Console changes needed for new domains
 
 Because Google OAuth is configured against Supabase's fixed callback URL (not
 your app's domain), a new Vercel deployment domain does **not** require any
-changes in Google Cloud Console. If you add a **custom domain** in Vercel, no
-Google/Supabase config changes are needed either — only your app's own
-`redirectTo` (already computed from `window.location.origin` in
-`app/login/page.tsx`) needs the domain to be reachable, which it is automatically.
+changes in Google Cloud Console. Your app's own `redirectTo` (already computed
+from `window.location.origin` in `app/login/page.tsx`) just needs the domain
+to be reachable, which it is automatically.
 
-### 5. Test production
+### 5. Add your production domain to Supabase's URL allow-list
 
-Visit the deployed URL, sign in, and run through the checklist above.
+This step is easy to miss and causes sign-in to redirect through `localhost`
+even on the deployed site. In Supabase, go to **Authentication → URL
+Configuration**:
+
+- **Site URL** — change from `http://localhost:3000` to your Vercel URL
+  (e.g. `https://your-app.vercel.app`). This is the fallback Supabase uses
+  when a requested redirect isn't recognized — if it's still set to
+  localhost, that's exactly where production sign-ins get bounced.
+- **Redirect URLs** — add `https://your-app.vercel.app/auth/callback` to the
+  allow-list. `redirectTo` is only honored if it matches an entry here.
+  Keep `http://localhost:3000/auth/callback` in the list too so local dev
+  keeps working — both can coexist.
+- If you also use Vercel preview deployments and want OAuth to work on those
+  per-branch URLs, add a wildcard entry like `https://*.vercel.app/auth/callback`.
+  Optional — most setups only need the stable production domain.
+
+### 6. Test production
+
+Visit the deployed URL, sign in, and run through the checklist above. Sign-in
+should complete entirely on your Vercel domain with no localhost redirect.
 
 ---
 
@@ -310,6 +328,24 @@ No `public.users` row exists for this account yet. See
 The OAuth handshake didn't complete. Check that Google is enabled as a provider
 in Supabase (**Authentication → Providers**) and that the Supabase callback URL
 is registered in Google Cloud Console's **Authorized redirect URIs**.
+
+### Sign-in redirects through `localhost` on the deployed (Vercel) app
+
+Supabase's **Site URL** is still set to `http://localhost:3000`, and/or your
+production `/auth/callback` URL isn't in Supabase's **Redirect URLs**
+allow-list — see [step 5 of Deployment to Vercel](#5-add-your-production-domain-to-supabases-url-allow-list).
+`redirectTo` is computed dynamically from the current domain in
+`app/login/page.tsx`, but Supabase only honors it if it matches an allowed
+redirect URL; otherwise it falls back to the Site URL.
+
+### Signing in on a browser already logged into the wrong Google account
+
+If the browser has an active Google session, "Continue with Google" will
+silently reuse that account instead of prompting you to choose — the app now
+passes `prompt: "select_account"` (`app/login/page.tsx`) so the picker always
+shows, but this only takes effect after that change is deployed. Incognito/
+guest profiles always show the picker since they have no existing Google
+session.
 
 ### Database errors creating/reading questions
 
