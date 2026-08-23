@@ -119,6 +119,7 @@ export async function POST(req: NextRequest) {
       score,
       explanation: question.explanation,
       correct_answer: question.correct_answer,
+      student_answer: answer,
       message: is_correct ? "Correct!" : is_correct === false ? "Incorrect" : "Submitted for manual grading",
     });
   } catch (e: any) {

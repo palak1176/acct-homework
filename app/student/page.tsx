@@ -20,13 +20,15 @@ export default function StudentPage() {
   const supabase = createClient();
   const router = useRouter();
   const [authorized, setAuthorized] = useState(false);
+  const [isTA, setIsTA] = useState(false);
+  const [resetting, setResetting] = useState<string | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [submissions, setSubmissions] = useState<Map<string, Submission>>(new Map());
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
   const [studentAnswer, setStudentAnswer] = useState("");
   const [matchAnswers, setMatchAnswers] = useState<Record<string, string>>({});
   const [matchRightOptions, setMatchRightOptions] = useState<string[]>([]);
-  const [feedback, setFeedback] = useState<{ is_correct: boolean | null; score: number | null; explanation: string | null; correct_answer: string | null } | null>(null);
+  const [feedback, setFeedback] = useState<{ is_correct: boolean | null; score: number | null; explanation: string | null; correct_answer: string | null; student_answer: string | null } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [filterChapter, setFilterChapter] = useState<number | null>(null);
@@ -47,7 +49,25 @@ export default function StudentPage() {
     }
 
     setAuthorized(true);
+    setIsTA(userRow.role === "ta");
     loadData();
+  };
+
+  const resetSubmission = async (q: Question) => {
+    if (!confirm(`Reset your submission for "${q.title}"? This can't be undone.`)) return;
+    setResetting(q.id);
+    const res = await fetch("/api/reset-submission", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question_id: q.id }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "Failed to reset submission");
+    } else {
+      loadData();
+    }
+    setResetting(null);
   };
 
   const loadData = async () => {
@@ -188,9 +208,21 @@ export default function StudentPage() {
                     </div>
                   </div>
                   {submitted ? (
-                    <button className="btn btn-ghost" style={{ marginLeft: "16px", minWidth: "100px", fontSize: "13px" }}>
-                      View Result
-                    </button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginLeft: "16px" }}>
+                      <button className="btn btn-ghost" style={{ minWidth: "100px", fontSize: "13px" }}>
+                        View Result
+                      </button>
+                      {isTA && (
+                        <button
+                          className="btn btn-ghost"
+                          disabled={resetting === q.id}
+                          onClick={e => { e.stopPropagation(); resetSubmission(q); }}
+                          style={{ minWidth: "100px", fontSize: "13px", color: "var(--red)" }}
+                        >
+                          {resetting === q.id ? "Resetting..." : "Reset"}
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <button className="btn btn-primary" disabled={!clickable} style={{ marginLeft: "16px", minWidth: "100px", fontSize: "13px" }}>
                       Answer
@@ -302,6 +334,35 @@ export default function StudentPage() {
                 </>
               ) : (
                 <>
+                  {feedback.student_answer !== null && feedback.student_answer !== undefined && (
+                    <div className="answer-block">
+                      <h3>Your Answer</h3>
+                      {isMatchType && Array.isArray(selectedQuestion.options) ? (
+                        <div
+                          className="answer-text"
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "minmax(120px, 1fr) minmax(160px, 1.4fr)",
+                            rowGap: "8px",
+                            columnGap: "16px",
+                          }}
+                        >
+                          {(() => {
+                            let studentMap: Record<string, string> = {};
+                            try { studentMap = JSON.parse(feedback.student_answer || "{}"); } catch { studentMap = {}; }
+                            return (selectedQuestion.options as MatchPair[]).map(pair => (
+                              <Fragment key={pair.id}>
+                                <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{pair.left}</span>
+                                <span style={{ textAlign: "right" }}>{studentMap[pair.id] ?? "(no answer)"}</span>
+                              </Fragment>
+                            ));
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="answer-text">{feedback.student_answer}</div>
+                      )}
+                    </div>
+                  )}
                   <div className="answer-block">
                     <h3>Correct Answer</h3>
                     {isMatchType && Array.isArray(selectedQuestion.options) ? (

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     // Only reveal the result if this user has actually submitted this question
     const { data: submission } = await supabase
       .from("submissions")
-      .select("is_correct, score")
+      .select("is_correct, score, answer")
       .eq("user_id", user.id)
       .eq("question_id", question_id)
       .single();
@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
       is_correct: submission.is_correct,
       score: submission.score,
       correct_answer: question.correct_answer,
+      student_answer: submission.answer,
       explanation: question.explanation,
     });
   } catch (e: any) {
