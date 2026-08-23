@@ -14,7 +14,7 @@ function shuffle<T>(arr: T[]): T[] {
   return copy;
 }
 
-const chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const chapters = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
 
 export default function StudentPage() {
   const supabase = createClient();

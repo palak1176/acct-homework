@@ -2,6 +2,16 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
+function normalizeAnswer(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\$/g, "")
+    .replace(/,/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function POST(req: NextRequest) {
   let userEmail: string | null = null;
   try {
@@ -53,7 +63,7 @@ export async function POST(req: NextRequest) {
     let score: number | null = 0;
 
     if (question.type === "text" || question.type === "fill_blank") {
-      is_correct = answer.trim().toLowerCase() === question.correct_answer.trim().toLowerCase();
+      is_correct = normalizeAnswer(answer) === normalizeAnswer(question.correct_answer);
       score = is_correct ? (question.points || 1) : 0;
     } else if (question.type === "multiple_choice") {
       // correct_answer is the option value/index

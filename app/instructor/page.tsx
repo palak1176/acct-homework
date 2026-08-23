@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Question, MatchPair } from "@/lib/types";
 
-const chapters = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const chapters = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
 
 function parsePairs(text: string): MatchPair[] {
   return text
