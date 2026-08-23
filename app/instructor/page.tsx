@@ -7,6 +7,13 @@ import type { Question, MatchPair } from "@/lib/types";
 
 const chapters = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
 
+function toDatetimeLocal(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function parsePairs(text: string): MatchPair[] {
   return text
     .split("\n")
@@ -245,6 +252,22 @@ export default function InstructorPage() {
     } finally {
       setSavingEdit(false);
     }
+  };
+
+  const selectChapterTab = (ch: number | null) => {
+    setFilterChapter(ch);
+
+    if (ch === null) {
+      setBulkAvailableAt("");
+      setBulkDueAt("");
+      return;
+    }
+
+    const chapterQuestions = questions.filter(q => q.chapter === ch);
+    const existingAvailableAt = chapterQuestions.find(q => q.available_at)?.available_at;
+    const existingDueAt = chapterQuestions.find(q => q.due_at)?.due_at;
+    setBulkAvailableAt(toDatetimeLocal(existingAvailableAt));
+    setBulkDueAt(toDatetimeLocal(existingDueAt));
   };
 
   const applyBulkSchedule = async () => {
@@ -495,7 +518,7 @@ export default function InstructorPage() {
           <div className="filter-tabs" style={{ marginBottom: "20px" }}>
             <button
               className={`tab ${filterChapter === null ? "active" : ""}`}
-              onClick={() => { setFilterChapter(null); setBulkAvailableAt(""); setBulkDueAt(""); }}
+              onClick={() => selectChapterTab(null)}
             >
               All Chapters
             </button>
@@ -503,7 +526,7 @@ export default function InstructorPage() {
               <button
                 key={ch}
                 className={`tab ${filterChapter === ch ? "active" : ""}`}
-                onClick={() => { setFilterChapter(ch); setBulkAvailableAt(""); setBulkDueAt(""); }}
+                onClick={() => selectChapterTab(ch)}
               >
                 Ch {ch}
               </button>
