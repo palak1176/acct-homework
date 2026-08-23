@@ -336,35 +336,39 @@ export default function StudentPage() {
                 </>
               ) : (
                 <>
-                  {feedback.student_answer !== null && feedback.student_answer !== undefined && (
-                    <div className="answer-block">
-                      <h3>Your Answer</h3>
-                      {isMatchType && Array.isArray(selectedQuestion.options) ? (
-                        <div
-                          className="answer-text"
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "minmax(120px, 1fr) minmax(160px, 1.4fr)",
-                            rowGap: "8px",
-                            columnGap: "16px",
-                          }}
-                        >
-                          {(() => {
-                            let studentMap: Record<string, string> = {};
-                            try { studentMap = JSON.parse(feedback.student_answer || "{}"); } catch { studentMap = {}; }
-                            return (selectedQuestion.options as MatchPair[]).map(pair => (
-                              <Fragment key={pair.id}>
-                                <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{pair.left}</span>
-                                <span style={{ textAlign: "right" }}>{studentMap[pair.id] ?? "(no answer)"}</span>
-                              </Fragment>
-                            ));
-                          })()}
-                        </div>
-                      ) : (
-                        <div className="answer-text">{feedback.student_answer}</div>
-                      )}
-                    </div>
-                  )}
+                  {feedback.student_answer !== null && feedback.student_answer !== undefined && (() => {
+                    const answerColor = feedback.is_correct === true ? "var(--green)" : feedback.is_correct === false ? "var(--red)" : undefined;
+                    return (
+                      <div className="answer-block">
+                        <h3>Your Answer</h3>
+                        {isMatchType && Array.isArray(selectedQuestion.options) ? (
+                          <div
+                            className="answer-text"
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(120px, 1fr) minmax(160px, 1.4fr)",
+                              rowGap: "8px",
+                              columnGap: "16px",
+                              color: answerColor,
+                            }}
+                          >
+                            {(() => {
+                              let studentMap: Record<string, string> = {};
+                              try { studentMap = JSON.parse(feedback.student_answer || "{}"); } catch { studentMap = {}; }
+                              return (selectedQuestion.options as MatchPair[]).map(pair => (
+                                <Fragment key={pair.id}>
+                                  <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{pair.left}</span>
+                                  <span style={{ textAlign: "right" }}>{studentMap[pair.id] ?? "(no answer)"}</span>
+                                </Fragment>
+                              ));
+                            })()}
+                          </div>
+                        ) : (
+                          <div className="answer-text" style={{ color: answerColor }}>{feedback.student_answer}</div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="answer-block">
                     <h3>Correct Answer</h3>
                     {isMatchType && Array.isArray(selectedQuestion.options) ? (
