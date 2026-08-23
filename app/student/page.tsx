@@ -534,7 +534,7 @@ export default function StudentPage() {
                   {feedback.is_correct !== null && (
                     <div style={{ padding: "12px 16px", borderRadius: "8px", backgroundColor: feedback.is_correct ? "var(--green-light)" : "var(--red-light)", borderLeft: `4px solid ${feedback.is_correct ? "var(--green)" : "var(--red)"}`, marginBottom: "16px" }}>
                       <p style={{ margin: "0", color: feedback.is_correct ? "var(--green)" : "var(--red)", fontWeight: "600" }}>
-                        {feedback.is_correct ? "✓ Correct!" : isMatchType || isGridType ? "Partial credit awarded" : "✗ Incorrect"}
+                        {feedback.is_correct ? "✓ Correct!" : (isMatchType || isGridType) && feedback.score ? "Partial credit awarded" : "✗ Incorrect"}
                       </p>
                     </div>
                   )}
