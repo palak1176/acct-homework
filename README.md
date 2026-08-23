@@ -109,7 +109,8 @@ supabase/
 ├── merge_labeling_into_matching.sql Collapses labeling into matching
 ├── fix_ta_submissions_policy.sql    Grants + SECURITY DEFINER fix for TA-wide reads (see file for why)
 ├── drop_unused.sql                  Drops unused tables/columns (question_images, study_groups, study_group_members, time_limit_sec, difficulty)
-└── grant_service_role.sql           Grants service_role base table privileges (needed for the cron job + error notifications)
+├── grant_service_role.sql           Grants service_role base table privileges (needed for the cron job + error notifications)
+└── grant_ta_delete_submissions.sql  Grants DELETE + RLS policy for TAs resetting their own test submissions
 ```
 
 ### Auth & role model
@@ -153,6 +154,7 @@ Open **SQL Editor** → **New Query** in Supabase, and run each file from `supab
 6. `supabase/fix_ta_submissions_policy.sql`
 7. `supabase/drop_unused.sql`
 8. `supabase/grant_service_role.sql`
+9. `supabase/grant_ta_delete_submissions.sql`
 
 Verify in **Table Editor**: you should see `users`, `questions`, `submissions`,
 and a `questions_public` view.
@@ -472,6 +474,12 @@ triggering RLS recursion.
 The `service_role` key used by `lib/supabase-admin.ts` bypasses RLS but still
 needs base table privileges, same underlying issue as the `authenticated`-role
 fix above. Run `supabase/grant_service_role.sql`.
+
+### `permission denied for table submissions` (Postgres code 42501) when a TA clicks Reset
+
+The `authenticated` role was only ever granted `SELECT, INSERT, UPDATE` on
+`submissions`, never `DELETE`, and there was no RLS policy allowing deletes.
+Run `supabase/grant_ta_delete_submissions.sql`.
 
 ### Image questions fail to submit
 

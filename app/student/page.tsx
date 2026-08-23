@@ -65,7 +65,7 @@ export default function StudentPage() {
       const data = await res.json();
       alert(data.error || "Failed to reset submission");
     } else {
-      loadData();
+      await loadData();
     }
     setResetting(null);
   };
@@ -73,7 +73,9 @@ export default function StudentPage() {
   const loadData = async () => {
     const { data } = await supabase.from("questions_public").select("*").order("chapter").order("order_index");
     if (data) setQuestions(data as Question[]);
-    const { data: subs } = await supabase.from("submissions").select("*");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: subs } = await supabase.from("submissions").select("*").eq("user_id", user.id);
     if (subs) {
       const map = new Map<string, Submission>();
       subs.forEach((s: any) => map.set(s.question_id, s));
