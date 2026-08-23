@@ -338,9 +338,10 @@ export default function StudentPage() {
                 <>
                   {feedback.student_answer !== null && feedback.student_answer !== undefined && (() => {
                     const answerColor = feedback.is_correct === true ? "var(--green)" : feedback.is_correct === false ? "var(--red)" : undefined;
+                    const answerBg = feedback.is_correct === true ? "var(--green-light)" : feedback.is_correct === false ? "var(--red-light)" : undefined;
                     return (
-                      <div className="answer-block">
-                        <h3>Your Answer</h3>
+                      <div className="answer-block" style={{ backgroundColor: answerBg, borderLeftColor: answerColor }}>
+                        <h3 style={{ color: answerColor }}>Your Answer</h3>
                         {isMatchType && Array.isArray(selectedQuestion.options) ? (
                           <div
                             className="answer-text"
