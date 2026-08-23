@@ -448,7 +448,6 @@ export default function InstructorPage() {
                 <select value={type} onChange={e => setType(e.target.value)}>
                   <option value="text">Text Answer</option>
                   <option value="multiple_choice">Multiple Choice</option>
-                  <option value="fill_blank">Fill in the Blank</option>
                   <option value="matching">Matching</option>
                 </select>
               </div>
