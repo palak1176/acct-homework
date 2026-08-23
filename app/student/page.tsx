@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase-client";
 import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Question, Submission, MatchPair } from "@/lib/types";
+import type { Question, Submission, MatchPair, GridData } from "@/lib/types";
+import { isNumericMatch, gridCellKey } from "@/lib/grid";
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -28,6 +29,7 @@ export default function StudentPage() {
   const [studentAnswer, setStudentAnswer] = useState("");
   const [matchAnswers, setMatchAnswers] = useState<Record<string, string>>({});
   const [matchRightOptions, setMatchRightOptions] = useState<string[]>([]);
+  const [gridAnswers, setGridAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<{ is_correct: boolean | null; score: number | null; explanation: string | null; correct_answer: string | null; student_answer: string | null } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -92,6 +94,7 @@ export default function StudentPage() {
         return;
       }
       setStudentAnswer("");
+      setGridAnswers({});
       setSubmitError(null);
       setFeedback(data);
       setSelectedQuestion(q);
@@ -104,10 +107,19 @@ export default function StudentPage() {
   const matchPairCount = Array.isArray(selectedQuestion?.options) ? (selectedQuestion!.options as MatchPair[]).length : 0;
   const matchComplete = isMatchType && Object.keys(matchAnswers).length === matchPairCount && matchPairCount > 0;
 
+  const isGridType = selectedQuestion?.type === "grid";
+  const gridData = isGridType && selectedQuestion?.options && !Array.isArray(selectedQuestion.options)
+    ? (selectedQuestion.options as GridData)
+    : null;
+  const gridBlankKeys = gridData
+    ? gridData.rows.flatMap((row, rIdx) => row.cells.map((cell, cIdx) => (cell === null ? gridCellKey(rIdx, cIdx) : null)).filter((k): k is string => k !== null))
+    : [];
+  const gridComplete = isGridType && gridBlankKeys.length > 0 && gridBlankKeys.every(k => (gridAnswers[k] ?? "").trim() !== "");
+
   const submitAnswer = async () => {
     if (!selectedQuestion) return;
-    const answerToSend = isMatchType ? JSON.stringify(matchAnswers) : studentAnswer;
-    if (isMatchType ? !matchComplete : !studentAnswer) return;
+    const answerToSend = isMatchType ? JSON.stringify(matchAnswers) : isGridType ? JSON.stringify(gridAnswers) : studentAnswer;
+    if (isMatchType ? !matchComplete : isGridType ? !gridComplete : !studentAnswer) return;
     setSubmitting(true);
     setSubmitError(null);
     const res = await fetch("/api/submit", {
@@ -166,6 +178,7 @@ export default function StudentPage() {
                   setSubmitError(null);
                   setStudentAnswer("");
                   setMatchAnswers({});
+                  setGridAnswers({});
                   if (q.type === "matching" && Array.isArray(q.options)) {
                     const uniqueRights = Array.from(new Set((q.options as MatchPair[]).map(p => p.right)));
                     setMatchRightOptions(shuffle(uniqueRights));
@@ -240,7 +253,7 @@ export default function StudentPage() {
 
       {selectedQuestion && (
         <div className="modal-overlay" onClick={() => setSelectedQuestion(null)}>
-          <div className="modal-box" style={isMatchType ? { maxWidth: "720px" } : undefined} onClick={e => e.stopPropagation()}>
+          <div className="modal-box" style={isMatchType || isGridType ? { maxWidth: "720px" } : undefined} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <h2 style={{ marginBottom: "4px" }}>{selectedQuestion.title}</h2>
@@ -324,10 +337,45 @@ export default function StudentPage() {
                         </Fragment>
                       ))}
                     </div>
+                  ) : isGridType && gridData ? (
+                    <div style={{ overflowX: "auto", marginBottom: "16px" }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th></th>
+                            {gridData.columns.map((col, cIdx) => <th key={cIdx}>{col}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gridData.rows.map((row, rIdx) => (
+                            <tr key={rIdx}>
+                              <td style={{ fontWeight: 600 }}>{row.label}</td>
+                              {row.cells.map((cell, cIdx) => {
+                                if (cell !== null) {
+                                  return <td key={cIdx}>{cell}</td>;
+                                }
+                                const key = gridCellKey(rIdx, cIdx);
+                                return (
+                                  <td key={cIdx}>
+                                    <input
+                                      type="text"
+                                      value={gridAnswers[key] || ""}
+                                      onChange={e => setGridAnswers(current => ({ ...current, [key]: e.target.value }))}
+                                      placeholder="?"
+                                      style={{ width: "100%", boxSizing: "border-box" }}
+                                    />
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   ) : null}
                   <button
                     onClick={submitAnswer}
-                    disabled={submitting || (isMatchType ? !matchComplete : !studentAnswer)}
+                    disabled={submitting || (isMatchType ? !matchComplete : isGridType ? !gridComplete : !studentAnswer)}
                     className="btn btn-primary"
                     style={{ width: "100%" }}
                   >
@@ -364,6 +412,41 @@ export default function StudentPage() {
                               ));
                             })()}
                           </div>
+                        ) : isGridType && gridData ? (
+                          <div style={{ overflowX: "auto" }}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th></th>
+                                  {gridData.columns.map((col, cIdx) => <th key={cIdx}>{col}</th>)}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(() => {
+                                  let studentMap: Record<string, string> = {};
+                                  let correctMap: Record<string, string> = {};
+                                  try { studentMap = JSON.parse(feedback.student_answer || "{}"); } catch { studentMap = {}; }
+                                  try { correctMap = JSON.parse(feedback.correct_answer || "{}"); } catch { correctMap = {}; }
+                                  return gridData.rows.map((row, rIdx) => (
+                                    <tr key={rIdx}>
+                                      <td style={{ fontWeight: 600 }}>{row.label}</td>
+                                      {row.cells.map((cell, cIdx) => {
+                                        if (cell !== null) return <td key={cIdx}>{cell}</td>;
+                                        const key = gridCellKey(rIdx, cIdx);
+                                        const studentValue = studentMap[key];
+                                        const cellCorrect = isNumericMatch(studentValue, correctMap[key]);
+                                        return (
+                                          <td key={cIdx} style={{ color: cellCorrect ? "var(--green)" : "var(--red)", fontWeight: 600 }}>
+                                            {studentValue || "(no answer)"}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  ));
+                                })()}
+                              </tbody>
+                            </table>
+                          </div>
                         ) : (
                           <div className="answer-text" style={{ color: answerColor }}>{feedback.student_answer}</div>
                         )}
@@ -393,6 +476,33 @@ export default function StudentPage() {
                           ));
                         })()}
                       </div>
+                    ) : isGridType && gridData ? (
+                      <div style={{ overflowX: "auto" }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th></th>
+                              {gridData.columns.map((col, cIdx) => <th key={cIdx}>{col}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              let correctMap: Record<string, string> = {};
+                              try { correctMap = JSON.parse(feedback.correct_answer || "{}"); } catch { correctMap = {}; }
+                              return gridData.rows.map((row, rIdx) => (
+                                <tr key={rIdx}>
+                                  <td style={{ fontWeight: 600 }}>{row.label}</td>
+                                  {row.cells.map((cell, cIdx) => {
+                                    if (cell !== null) return <td key={cIdx}>{cell}</td>;
+                                    const key = gridCellKey(rIdx, cIdx);
+                                    return <td key={cIdx}>{correctMap[key] ?? "?"}</td>;
+                                  })}
+                                </tr>
+                              ));
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
                       <div className="answer-text">{feedback.correct_answer}</div>
                     )}
@@ -403,15 +513,28 @@ export default function StudentPage() {
                       <p className="explanation-text">{feedback.explanation || selectedQuestion.explanation}</p>
                     </div>
                   )}
-                  {isMatchType && feedback.score !== null && (
-                    <p style={{ fontSize: "14px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
+                  {(isMatchType || isGridType) && feedback.score !== null && (
+                    <p style={{ fontSize: "14px", color: "var(--text-muted)", margin: "0 0 4px 0" }}>
                       Score: {feedback.score} / {selectedQuestion.points ?? 1}
                     </p>
                   )}
+                  {isGridType && feedback.correct_answer && feedback.student_answer && (() => {
+                    let studentMap: Record<string, string> = {};
+                    let correctMap: Record<string, string> = {};
+                    try { studentMap = JSON.parse(feedback.student_answer); } catch { studentMap = {}; }
+                    try { correctMap = JSON.parse(feedback.correct_answer); } catch { correctMap = {}; }
+                    const keys = Object.keys(correctMap);
+                    const matches = keys.filter(k => isNumericMatch(studentMap[k], correctMap[k])).length;
+                    return (
+                      <p style={{ fontSize: "14px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
+                        {matches} of {keys.length} blanks correct
+                      </p>
+                    );
+                  })()}
                   {feedback.is_correct !== null && (
                     <div style={{ padding: "12px 16px", borderRadius: "8px", backgroundColor: feedback.is_correct ? "var(--green-light)" : "var(--red-light)", borderLeft: `4px solid ${feedback.is_correct ? "var(--green)" : "var(--red)"}`, marginBottom: "16px" }}>
                       <p style={{ margin: "0", color: feedback.is_correct ? "var(--green)" : "var(--red)", fontWeight: "600" }}>
-                        {feedback.is_correct ? "✓ Correct!" : isMatchType ? "Partial credit awarded" : "✗ Incorrect"}
+                        {feedback.is_correct ? "✓ Correct!" : isMatchType || isGridType ? "Partial credit awarded" : "✗ Incorrect"}
                       </p>
                     </div>
                   )}

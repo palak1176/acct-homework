@@ -3,7 +3,10 @@ import { createClient } from "@/lib/supabase-client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Question, MatchPair } from "@/lib/types";
+import type { Question, MatchPair, GridData, GridRow } from "@/lib/types";
+
+type GridCellEditor = { blank: boolean; value: string };
+type GridRowEditor = { label: string; cells: GridCellEditor[] };
 
 const chapters = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
 
@@ -38,6 +41,10 @@ export default function InstructorPage() {
   const [type, setType] = useState("text");
   const [options, setOptions] = useState("");
   const [pairs, setPairs] = useState("");
+  const [gridColumns, setGridColumns] = useState<string[]>([]);
+  const [gridColumnInput, setGridColumnInput] = useState("");
+  const [gridRows, setGridRows] = useState<GridRowEditor[]>([]);
+  const [gridRowLabelInput, setGridRowLabelInput] = useState("");
   const [filterChapter, setFilterChapter] = useState<number | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -159,6 +166,88 @@ export default function InstructorPage() {
     }
   };
 
+  const resetGridEditor = () => {
+    setGridColumns([]);
+    setGridColumnInput("");
+    setGridRows([]);
+    setGridRowLabelInput("");
+  };
+
+  const addGridColumn = () => {
+    const label = gridColumnInput.trim();
+    if (!label) return;
+    setGridColumns(current => [...current, label]);
+    setGridRows(current => current.map(r => ({ ...r, cells: [...r.cells, { blank: false, value: "" }] })));
+    setGridColumnInput("");
+  };
+
+  const removeGridColumn = (colIdx: number) => {
+    setGridColumns(current => current.filter((_, i) => i !== colIdx));
+    setGridRows(current => current.map(r => ({ ...r, cells: r.cells.filter((_, i) => i !== colIdx) })));
+  };
+
+  const updateGridColumnLabel = (colIdx: number, label: string) => {
+    setGridColumns(current => current.map((c, i) => (i === colIdx ? label : c)));
+  };
+
+  const addGridRow = () => {
+    const label = gridRowLabelInput.trim() || String.fromCharCode(65 + gridRows.length);
+    setGridRows(current => [...current, { label, cells: gridColumns.map(() => ({ blank: false, value: "" })) }]);
+    setGridRowLabelInput("");
+  };
+
+  const removeGridRow = (rowIdx: number) => {
+    setGridRows(current => current.filter((_, i) => i !== rowIdx));
+  };
+
+  const updateGridRowLabel = (rowIdx: number, label: string) => {
+    setGridRows(current => current.map((r, i) => (i === rowIdx ? { ...r, label } : r)));
+  };
+
+  const updateGridCell = (rowIdx: number, colIdx: number, patch: Partial<GridCellEditor>) => {
+    setGridRows(current =>
+      current.map((r, i) =>
+        i === rowIdx
+          ? { ...r, cells: r.cells.map((c, j) => (j === colIdx ? { ...c, ...patch } : c)) }
+          : r
+      )
+    );
+  };
+
+  const validateGrid = (): string | null => {
+    if (gridColumns.length === 0) return "Add at least one column.";
+    if (gridRows.length === 0) return "Add at least one row.";
+    let hasBlank = false;
+    for (const row of gridRows) {
+      for (const cell of row.cells) {
+        if (cell.blank) {
+          hasBlank = true;
+          if (!cell.value.trim()) return "Every blank cell needs a correct answer.";
+        } else if (cell.value.trim() === "" || Number.isNaN(parseFloat(cell.value))) {
+          return "Every non-blank cell needs a numeric value.";
+        }
+      }
+    }
+    if (!hasBlank) return "Mark at least one cell as blank for students to fill in.";
+    return null;
+  };
+
+  const buildGridPayload = (): { options: GridData; correct_answer: string } => {
+    const correctMap: Record<string, string> = {};
+    const rows: GridRow[] = gridRows.map((row, rIdx) => ({
+      label: row.label,
+      cells: row.cells.map((cell, cIdx) => {
+        if (cell.blank) {
+          correctMap[`${rIdx}-${cIdx}`] = cell.value.trim();
+          return null;
+        }
+        const num = parseFloat(cell.value);
+        return Number.isNaN(num) ? null : num;
+      }),
+    }));
+    return { options: { columns: gridColumns, rows }, correct_answer: JSON.stringify(correctMap) };
+  };
+
   const editQuestion = async (q: Question) => {
     setEditingId(q.id);
 
@@ -184,6 +273,26 @@ export default function InstructorPage() {
       setPairs("");
     }
 
+    if (q.type === "grid" && q.options && !Array.isArray(q.options)) {
+      const gridData = q.options as GridData;
+      let correctMap: Record<string, string> = {};
+      try { correctMap = JSON.parse(q.correct_answer || "{}"); } catch { correctMap = {}; }
+      setGridColumns(gridData.columns || []);
+      setGridRows(
+        (gridData.rows || []).map((row, rIdx) => ({
+          label: row.label,
+          cells: row.cells.map((cell, cIdx) => {
+            const key = `${rIdx}-${cIdx}`;
+            return cell === null
+              ? { blank: true, value: correctMap[key] ?? "" }
+              : { blank: false, value: String(cell) };
+          }),
+        }))
+      );
+    } else {
+      resetGridEditor();
+    }
+
     window.scrollTo({
       top: 0,
       behavior: "smooth",
@@ -192,14 +301,21 @@ export default function InstructorPage() {
 
   const saveEdit = async () => {
     const isMatchType = type === "matching";
+    const isGridType = type === "grid";
     const parsedPairs = isMatchType ? parsePairs(pairs) : [];
 
     if (!editingId || !title || !prompt) return;
-    if (isMatchType ? parsedPairs.length < 2 : !answer) return;
+    if (isGridType) {
+      const gridError = validateGrid();
+      if (gridError) { showToast(gridError, "error"); return; }
+    } else if (isMatchType ? parsedPairs.length < 2 : !answer) {
+      return;
+    }
 
     setSavingEdit(true);
 
     try {
+      const gridPayload = isGridType ? buildGridPayload() : null;
       const response = await fetch("/api/questions", {
         method: "PATCH",
         headers: {
@@ -209,17 +325,21 @@ export default function InstructorPage() {
           id: editingId,
           title,
           prompt,
-          correct_answer: isMatchType
-            ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
-            : answer,
+          correct_answer: isGridType
+            ? gridPayload!.correct_answer
+            : isMatchType
+              ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
+              : answer,
           explanation,
           chapter,
           type,
-          options: isMatchType
-            ? parsedPairs
-            : type === "multiple_choice"
-              ? options.split("\n").filter(Boolean)
-              : null,
+          options: isGridType
+            ? gridPayload!.options
+            : isMatchType
+              ? parsedPairs
+              : type === "multiple_choice"
+                ? options.split("\n").filter(Boolean)
+                : null,
         }),
       });
 
@@ -239,6 +359,7 @@ export default function InstructorPage() {
       setExplanation("");
       setOptions("");
       setPairs("");
+      resetGridEditor();
 
       showToast("Question updated");
       await loadQuestions();
@@ -335,14 +456,21 @@ export default function InstructorPage() {
 
   const createQuestion = async () => {
     const isMatchType = type === "matching";
+    const isGridType = type === "grid";
     const parsedPairs = isMatchType ? parsePairs(pairs) : [];
 
     if (!title || !prompt) return;
-    if (isMatchType ? parsedPairs.length < 2 : !answer) return;
+    if (isGridType) {
+      const gridError = validateGrid();
+      if (gridError) { showToast(gridError, "error"); return; }
+    } else if (isMatchType ? parsedPairs.length < 2 : !answer) {
+      return;
+    }
 
     setCreating(true);
 
     try {
+      const gridPayload = isGridType ? buildGridPayload() : null;
       const response = await fetch("/api/questions", {
         method: "POST",
         headers: {
@@ -351,17 +479,21 @@ export default function InstructorPage() {
         body: JSON.stringify({
           title,
           prompt,
-          correct_answer: isMatchType
-            ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
-            : answer,
+          correct_answer: isGridType
+            ? gridPayload!.correct_answer
+            : isMatchType
+              ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
+              : answer,
           explanation,
           chapter,
           type,
-          options: isMatchType
-            ? parsedPairs
-            : type === "multiple_choice"
-              ? options.split("\n").filter(Boolean)
-              : null,
+          options: isGridType
+            ? gridPayload!.options
+            : isMatchType
+              ? parsedPairs
+              : type === "multiple_choice"
+                ? options.split("\n").filter(Boolean)
+                : null,
         }),
       });
 
@@ -380,6 +512,7 @@ export default function InstructorPage() {
       setExplanation("");
       setOptions("");
       setPairs("");
+      resetGridEditor();
 
       showToast("Question created");
       // Reload questions
@@ -398,6 +531,7 @@ export default function InstructorPage() {
   if (!authorized) return <div style={{ padding: "40px", textAlign: "center" }}>Loading...</div>;
 
   const isMatchType = type === "matching";
+  const isGridType = type === "grid";
   const questionChapters = Array.from(new Set(questions.map(q => q.chapter))).sort((a, b) => a - b);
   const filteredQuestions = filterChapter ? questions.filter(q => q.chapter === filterChapter) : questions;
 
@@ -432,7 +566,7 @@ export default function InstructorPage() {
               <label>Prompt</label>
               <textarea placeholder="What do you want students to answer?" value={prompt} onChange={e => setPrompt(e.target.value)} />
             </div>
-            {!isMatchType && (
+            {!isMatchType && !isGridType && (
               <div className="form-group">
                 <label>Correct Answer</label>
                 <textarea placeholder="Debit Cash 1000, Credit Revenue 1000" value={answer} onChange={e => setAnswer(e.target.value)} />
@@ -449,6 +583,7 @@ export default function InstructorPage() {
                   <option value="text">Text Answer</option>
                   <option value="multiple_choice">Multiple Choice</option>
                   <option value="matching">Matching</option>
+                  <option value="grid">Grid (Table)</option>
                 </select>
               </div>
             </div>
@@ -471,6 +606,97 @@ export default function InstructorPage() {
                 </p>
               </div>
             )}
+            {isGridType && (
+              <div className="form-group">
+                <label>Grid Columns</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
+                  {gridColumns.map((col, cIdx) => (
+                    <div key={cIdx} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <input
+                        type="text"
+                        value={col}
+                        onChange={e => updateGridColumnLabel(cIdx, e.target.value)}
+                        style={{ width: "160px" }}
+                      />
+                      <button type="button" onClick={() => removeGridColumn(cIdx)} className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: "12px" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                  <input
+                    type="text"
+                    placeholder="New column label (e.g., Net Income)"
+                    value={gridColumnInput}
+                    onChange={e => setGridColumnInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGridColumn(); } }}
+                  />
+                  <button type="button" onClick={addGridColumn} className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>Add Column</button>
+                </div>
+
+                {gridColumns.length > 0 && (
+                  <>
+                    <label>Rows</label>
+                    <div style={{ overflowX: "auto", marginBottom: "12px" }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            {gridColumns.map((col, cIdx) => <th key={cIdx}>{col}</th>)}
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {gridRows.map((row, rIdx) => (
+                            <tr key={rIdx}>
+                              <td>
+                                <input type="text" value={row.label} onChange={e => updateGridRowLabel(rIdx, e.target.value)} style={{ width: "80px" }} />
+                              </td>
+                              {row.cells.map((cell, cIdx) => (
+                                <td key={cIdx} style={{ backgroundColor: cell.blank ? "rgba(201, 162, 39, 0.12)" : undefined }}>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                    <input
+                                      type="text"
+                                      value={cell.value}
+                                      placeholder={cell.blank ? "Correct answer" : "Given value"}
+                                      onChange={e => updateGridCell(rIdx, cIdx, { value: e.target.value })}
+                                      style={{ width: "110px" }}
+                                    />
+                                    <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={cell.blank}
+                                        onChange={e => updateGridCell(rIdx, cIdx, { blank: e.target.checked })}
+                                      />
+                                      Blank for student
+                                    </label>
+                                  </div>
+                                </td>
+                              ))}
+                              <td>
+                                <button type="button" onClick={() => removeGridRow(rIdx)} className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: "12px" }}>✕</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                      <input
+                        type="text"
+                        placeholder={`Row label (e.g., ${String.fromCharCode(65 + gridRows.length)})`}
+                        value={gridRowLabelInput}
+                        onChange={e => setGridRowLabelInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGridRow(); } }}
+                      />
+                      <button type="button" onClick={addGridRow} className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>Add Row</button>
+                    </div>
+                    <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
+                      Check "Blank for student" on a cell and enter its correct answer instead of a given value. Students see given values as plain text and blank cells as fillable inputs, graded per cell.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
             <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
               {editingId ? (
                 <>
@@ -491,6 +717,7 @@ export default function InstructorPage() {
                       setExplanation("");
                       setOptions("");
                       setPairs("");
+                      resetGridEditor();
                     }}
                     disabled={savingEdit}
                     className="btn btn-secondary"

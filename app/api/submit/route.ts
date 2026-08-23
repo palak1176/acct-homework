@@ -1,5 +1,6 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { notifyTAOfError } from "@/lib/notify-ta";
+import { isNumericMatch } from "@/lib/grid";
 import { NextRequest, NextResponse } from "next/server";
 
 function normalizeAnswer(value: string): string {
@@ -82,6 +83,21 @@ export async function POST(req: NextRequest) {
       is_correct = pairIds.length > 0 && matches === pairIds.length;
       score = pairIds.length > 0
         ? Math.round((matches / pairIds.length) * (question.points || 1) * 100) / 100
+        : 0;
+    } else if (question.type === "grid") {
+      // answer is a JSON-encoded map of "rowIndex-colIndex" -> student value,
+      // one entry per blank cell. correct_answer is the same shape.
+      let studentMap: Record<string, string> = {};
+      let correctMap: Record<string, string> = {};
+      try { studentMap = JSON.parse(answer); } catch { studentMap = {}; }
+      try { correctMap = JSON.parse(question.correct_answer); } catch { correctMap = {}; }
+
+      const cellKeys = Object.keys(correctMap);
+      const matches = cellKeys.filter(k => isNumericMatch(studentMap[k], correctMap[k])).length;
+
+      is_correct = cellKeys.length > 0 && matches === cellKeys.length;
+      score = cellKeys.length > 0
+        ? Math.round((matches / cellKeys.length) * (question.points || 1) * 100) / 100
         : 0;
     } else if (question.type === "image") {
       // TA must manually grade image submissions

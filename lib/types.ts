@@ -13,8 +13,8 @@ export interface Question {
   correct_answer?: string;
   explanation?: string | null;
   created_at: string;
-  type?: "text" | "multiple_choice" | "fill_blank" | "image" | "matching";
-  options?: any[] | null;
+  type?: "text" | "multiple_choice" | "fill_blank" | "image" | "matching" | "grid";
+  options?: any[] | GridData | null;
   due_at?: string | null;
   available_at?: string | null;
   points?: number;
@@ -27,6 +27,21 @@ export interface MatchPair {
   id: string;
   left: string;
   right: string;
+}
+
+export interface GridRow {
+  label: string;
+  cells: (number | null)[];
+}
+
+// Stored in a grid question's `options` column. Blank cells (to be
+// filled by the student) are `null`; the correct values for those
+// blanks live separately in `correct_answer` (a JSON map of
+// "rowIndex-colIndex" -> correct value) so they aren't exposed via
+// questions_public.
+export interface GridData {
+  columns: string[];
+  rows: GridRow[];
 }
 
 export interface Submission {
