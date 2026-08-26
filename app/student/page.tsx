@@ -34,6 +34,10 @@ export default function StudentPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [filterChapter, setFilterChapter] = useState<number | null>(null);
+  const [needsGtEmail, setNeedsGtEmail] = useState(false);
+  const [gtEmailInput, setGtEmailInput] = useState("");
+  const [gtEmailError, setGtEmailError] = useState<string | null>(null);
+  const [savingGtEmail, setSavingGtEmail] = useState(false);
 
   useEffect(() => { checkAccess(); }, []);
 
@@ -44,7 +48,7 @@ export default function StudentPage() {
       return;
     }
 
-    const { data: userRow } = await supabase.from("users").select("role").eq("id", user.id).single();
+    const { data: userRow } = await supabase.from("users").select("role, gt_email").eq("id", user.id).single();
     if (!userRow) {
       router.replace("/login");
       return;
@@ -52,7 +56,28 @@ export default function StudentPage() {
 
     setAuthorized(true);
     setIsTA(userRow.role === "ta");
+    if (userRow.role === "student" && !userRow.gt_email) {
+      setNeedsGtEmail(true);
+    }
     loadData();
+  };
+
+  const submitGtEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingGtEmail(true);
+    setGtEmailError(null);
+    const res = await fetch("/api/gt-email", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gt_email: gtEmailInput }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setGtEmailError(data.error || "Failed to save.");
+    } else {
+      setNeedsGtEmail(false);
+    }
+    setSavingGtEmail(false);
   };
 
   const resetSubmission = async (q: Question) => {
@@ -141,6 +166,35 @@ export default function StudentPage() {
   const filteredQuestions = filterChapter ? questions.filter(q => q.chapter === filterChapter) : questions;
 
   if (!authorized) return <div style={{ padding: "40px", textAlign: "center" }}>Loading...</div>;
+
+  if (needsGtEmail) {
+    return (
+      <div style={{ maxWidth: "420px", margin: "80px auto", padding: "24px" }}>
+        <div className="question-card">
+          <h2 style={{ marginBottom: "8px" }}>One more thing</h2>
+          <p style={{ marginBottom: "16px", color: "var(--text)" }}>
+            Please enter your Georgia Tech email so we can match your homework records.
+          </p>
+          <form onSubmit={submitGtEmail}>
+            <input
+              type="email"
+              placeholder="yourname@gatech.edu"
+              value={gtEmailInput}
+              onChange={e => setGtEmailInput(e.target.value)}
+              required
+              style={{ width: "100%", boxSizing: "border-box", marginBottom: "12px" }}
+            />
+            {gtEmailError && (
+              <p style={{ color: "var(--red)", marginBottom: "12px", fontSize: "14px" }}>{gtEmailError}</p>
+            )}
+            <button type="submit" className="btn btn-primary" style={{ width: "100%" }} disabled={savingGtEmail}>
+              {savingGtEmail ? "Saving..." : "Save"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 
     const { data: students, error: studentsError } = await supabase
       .from("users")
-      .select("id, name, email")
+      .select("id, name, email, gt_email")
       .eq("role", "student")
       .order("name");
 
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
     const totalQuestions = (questions ?? []).length;
 
-    const header = ["Student Name", "Email", ...chapters.map(ch => `Chapter ${ch} %`), "Overall %"];
+    const header = ["Student Name", "Email", "GT Email", ...chapters.map(ch => `Chapter ${ch} %`), "Overall %"];
     let csv = header.join(",") + "\n";
 
     (students ?? []).forEach(st => {
@@ -77,8 +77,9 @@ export async function GET(req: NextRequest) {
 
       const name = (st.name || "").replace(/"/g, '""');
       const email = (st.email || "").replace(/"/g, '""');
+      const gtEmail = (st.gt_email || "").replace(/"/g, '""');
 
-      csv += [`"${name}"`, `"${email}"`, ...chapterPcts, overallPct].join(",") + "\n";
+      csv += [`"${name}"`, `"${email}"`, `"${gtEmail}"`, ...chapterPcts, overallPct].join(",") + "\n";
     });
 
     return new NextResponse(csv, {

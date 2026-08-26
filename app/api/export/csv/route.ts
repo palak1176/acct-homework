@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     // Fetch all submissions with student & question info
     const { data: submissions, error } = await supabase
       .from("submissions")
-      .select("id, user_id, question_id, answer, is_correct, score, submitted_at, users(email), questions(title, chapter, points)")
+      .select("id, user_id, question_id, answer, is_correct, score, submitted_at, users(email, gt_email), questions(title, chapter, points)")
       .order("submitted_at");
 
     if (error) {
@@ -30,9 +30,10 @@ export async function GET(req: NextRequest) {
     }
 
     // Build CSV
-    let csv = "Student Email,Chapter,Question,Answer,Correct,Score,Max Score,Submitted At\n";
+    let csv = "Student Email,GT Email,Chapter,Question,Answer,Correct,Score,Max Score,Submitted At\n";
     submissions?.forEach((sub: any) => {
       const email = sub.users?.email || "unknown";
+      const gtEmail = sub.users?.gt_email || "";
       const chapter = sub.questions?.chapter || "";
       const title = sub.questions?.title || "";
       const maxScore = sub.questions?.points || 1;
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
       const date = new Date(sub.submitted_at).toLocaleString();
       const answer = (sub.answer || "").replace(/"/g, '""'); // Escape quotes
 
-      csv += `"${email}",${chapter},"${title}","${answer}",${isCorrect},${score}/${maxScore},"${date}"\n`;
+      csv += `"${email}","${gtEmail}",${chapter},"${title}","${answer}",${isCorrect},${score}/${maxScore},"${date}"\n`;
     });
 
     return new NextResponse(csv, {

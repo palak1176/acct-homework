@@ -3,6 +3,7 @@ export interface User {
   email: string;
   name: string | null;
   role: "ta" | "student";
+  gt_email: string | null;
 }
 
 export interface Question {
