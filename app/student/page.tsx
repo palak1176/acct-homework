@@ -251,7 +251,7 @@ export default function StudentPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                   <div style={{ flex: 1 }}>
                     <div className="question-title">{q.title}</div>
-                    <p style={{ margin: "8px 0 12px 0", color: "var(--text)", fontSize: "14px" }}>{q.prompt}</p>
+                    <p style={{ margin: "8px 0 12px 0", color: "var(--text)", fontSize: "14px", whiteSpace: "pre-line" }}>{q.prompt}</p>
                     <div className="question-meta">
                       <span className="badge badge-chapter">Ch {q.chapter}</span>
                       {submitted && <span className="badge badge-submitted">✓ Submitted</span>}
@@ -318,7 +318,7 @@ export default function StudentPage() {
               </div>
             </div>
             <div className="modal-content">
-              <p style={{ color: "var(--text)", lineHeight: "1.6" }}>{selectedQuestion.prompt}</p>
+              <p style={{ color: "var(--text)", lineHeight: "1.6", whiteSpace: "pre-line" }}>{selectedQuestion.prompt}</p>
               {!feedback ? (
                 <>
                   {submitError && (

@@ -836,6 +836,7 @@ export default function InstructorPage() {
                     margin: "8px 0",
                     color: "var(--text)",
                     fontSize: "14px",
+                    whiteSpace: "pre-line"
                   }}
                 >
                   {q.prompt}
