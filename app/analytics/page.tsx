@@ -24,6 +24,26 @@ interface StudentStats {
   completion_pct: number;
 }
 
+async function fetchAllRows<T>(
+  baseQuery: any
+): Promise<T[]> {
+  const pageSize = 1000;
+  let allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await baseQuery.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    allRows = allRows.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows;
+}
+
 export default function Analytics() {
   const [rawQuestions, setRawQuestions] = useState<any[]>([]);
   const [rawSubs, setRawSubs] = useState<any[]>([]);
@@ -50,13 +70,15 @@ export default function Analytics() {
       return;
     }
 
-    const { data: questions } = await supabase.from("questions_public").select("*").order("chapter").order("order_index");
-    const { data: allSubs } = await supabase.from("submissions").select("*");
-    const { data: students } = await supabase.from("users").select("*").eq("role", "student");
+    const [questions, allSubs, students] = await Promise.all([
+      fetchAllRows<any>(supabase.from("questions_public").select("*").order("chapter").order("order_index")),
+      fetchAllRows<any>(supabase.from("submissions").select("*")),
+      fetchAllRows<any>(supabase.from("users").select("*").eq("role", "student")),
+    ]);
 
-    setRawQuestions(questions ?? []);
-    setRawSubs(allSubs ?? []);
-    setRawStudents(students ?? []);
+    setRawQuestions(questions);
+    setRawSubs(allSubs);
+    setRawStudents(students);
 
     setLoading(false);
   };
