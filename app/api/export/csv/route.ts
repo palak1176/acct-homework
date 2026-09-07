@@ -2,6 +2,24 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
+async function fetchAllRows<T>(baseQuery: any): Promise<T[]> {
+  const pageSize = 1000;
+  let allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await baseQuery.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    allRows = allRows.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows;
+}
+
 export async function GET(req: NextRequest) {
   let userEmail: string | null = null;
   try {
@@ -18,20 +36,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Fetch all submissions with student & question info
-    const { data: submissions, error } = await supabase
-      .from("submissions")
-      .select("id, user_id, question_id, answer, is_correct, score, submitted_at, users(email, gt_email), questions(title, chapter, points)")
-      .order("submitted_at");
-
-    if (error) {
-      await notifyTAOfError({ route: "GET /api/export/csv", userEmail, message: error.message });
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const submissions = await fetchAllRows<any>(
+      supabase
+        .from("submissions")
+        .select("id, user_id, question_id, answer, is_correct, score, submitted_at, users(email, gt_email), questions(title, chapter, points)")
+        .order("submitted_at")
+    );
 
     // Build CSV
     let csv = "Student Email,GT Email,Chapter,Question,Answer,Correct,Score,Max Score,Submitted At\n";
-    submissions?.forEach((sub: any) => {
+    submissions.forEach((sub: any) => {
       const email = sub.users?.email || "unknown";
       const gtEmail = sub.users?.gt_email || "";
       const chapter = sub.questions?.chapter || "";

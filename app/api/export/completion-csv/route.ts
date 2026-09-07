@@ -2,6 +2,24 @@ import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { notifyTAOfError } from "@/lib/notify-ta";
 import { NextRequest, NextResponse } from "next/server";
 
+async function fetchAllRows<T>(baseQuery: any): Promise<T[]> {
+  const pageSize = 1000;
+  let allRows: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await baseQuery.range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    allRows = allRows.concat(data as T[]);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return allRows;
+}
+
 export async function GET(req: NextRequest) {
   let userEmail: string | null = null;
   try {
@@ -17,34 +35,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { data: students, error: studentsError } = await supabase
-      .from("users")
-      .select("id, name, email, gt_email")
-      .eq("role", "student")
-      .order("name");
+    const students = await fetchAllRows<any>(
+      supabase.from("users").select("id, name, email, gt_email").eq("role", "student").order("name")
+    );
 
-    if (studentsError) {
-      await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: studentsError.message });
-      return NextResponse.json({ error: studentsError.message }, { status: 500 });
-    }
+    const questions = await fetchAllRows<any>(
+      supabase.from("questions").select("id, chapter")
+    );
 
-    const { data: questions, error: questionsError } = await supabase
-      .from("questions")
-      .select("id, chapter");
-
-    if (questionsError) {
-      await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: questionsError.message });
-      return NextResponse.json({ error: questionsError.message }, { status: 500 });
-    }
-
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select("user_id, question_id");
-
-    if (submissionsError) {
-      await notifyTAOfError({ route: "GET /api/export/completion-csv", userEmail, message: submissionsError.message });
-      return NextResponse.json({ error: submissionsError.message }, { status: 500 });
-    }
+    const submissions = await fetchAllRows<any>(
+      supabase.from("submissions").select("user_id, question_id")
+    );
 
     const chapters = Array.from(new Set((questions ?? []).map(q => q.chapter))).sort((a, b) => a - b);
 
