@@ -1,6 +1,6 @@
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { notifyTAOfError } from "@/lib/notify-ta";
-import { isNumericMatch } from "@/lib/grid";
+import { isNumericMatch, isJeFieldMatch } from "@/lib/grid";
 import { NextRequest, NextResponse } from "next/server";
 
 function normalizeAnswer(value: string): string {
@@ -98,6 +98,24 @@ export async function POST(req: NextRequest) {
       is_correct = cellKeys.length > 0 && matches === cellKeys.length;
       score = cellKeys.length > 0
         ? Math.round((matches / cellKeys.length) * (question.points || 1) * 100) / 100
+        : 0;
+    } else if (question.type === "journal_entry") {
+      // answer is a JSON-encoded map of "lineIndex-account" / "lineIndex-debit" /
+      // "lineIndex-credit" -> student value, one entry per blank field.
+      // correct_answer is the same shape. Account fields are graded by exact
+      // string match; debit/credit fields use the same numeric tolerance
+      // match as grid cells.
+      let studentMap: Record<string, string> = {};
+      let correctMap: Record<string, string> = {};
+      try { studentMap = JSON.parse(answer); } catch { studentMap = {}; }
+      try { correctMap = JSON.parse(question.correct_answer); } catch { correctMap = {}; }
+
+      const fieldKeys = Object.keys(correctMap);
+      const matches = fieldKeys.filter(k => isJeFieldMatch(k, studentMap[k], correctMap[k])).length;
+
+      is_correct = fieldKeys.length > 0 && matches === fieldKeys.length;
+      score = fieldKeys.length > 0
+        ? Math.round((matches / fieldKeys.length) * (question.points || 1) * 100) / 100
         : 0;
     } else if (question.type === "image") {
       // TA must manually grade image submissions

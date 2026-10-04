@@ -14,8 +14,8 @@ export interface Question {
   correct_answer?: string;
   explanation?: string | null;
   created_at: string;
-  type?: "text" | "multiple_choice" | "fill_blank" | "image" | "matching" | "grid";
-  options?: any[] | GridData | null;
+  type?: "text" | "multiple_choice" | "fill_blank" | "image" | "matching" | "grid" | "journal_entry";
+  options?: any[] | GridData | JournalEntryData | null;
   due_at?: string | null;
   available_at?: string | null;
   points?: number;
@@ -43,6 +43,23 @@ export interface GridRow {
 export interface GridData {
   columns: string[];
   rows: GridRow[];
+}
+
+export interface JournalEntryLine {
+  account: string | null;
+  debit: number | null;
+  credit: number | null;
+}
+
+// Stored in a journal_entry question's `options` column. Any field set
+// to `null` (account, debit, or credit) is a blank the student must
+// fill in; the correct value for each blank lives separately in
+// `correct_answer` (a JSON map of "lineIndex-field" -> correct value,
+// e.g. "0-account", "0-debit", "0-credit") so it isn't exposed via
+// questions_public.
+export interface JournalEntryData {
+  accountOptions: string[];
+  lines: JournalEntryLine[];
 }
 
 export interface Submission {

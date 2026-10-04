@@ -3,8 +3,8 @@ import { createClient } from "@/lib/supabase-client";
 import { Fragment, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Question, Submission, MatchPair, GridData } from "@/lib/types";
-import { isNumericMatch, gridCellKey } from "@/lib/grid";
+import type { Question, Submission, MatchPair, GridData, JournalEntryData } from "@/lib/types";
+import { isNumericMatch, gridCellKey, jeFieldKey, isJeFieldMatch } from "@/lib/grid";
 
 function shuffle<T>(arr: T[]): T[] {
   const copy = [...arr];
@@ -30,6 +30,7 @@ export default function StudentPage() {
   const [matchAnswers, setMatchAnswers] = useState<Record<string, string>>({});
   const [matchRightOptions, setMatchRightOptions] = useState<string[]>([]);
   const [gridAnswers, setGridAnswers] = useState<Record<string, string>>({});
+  const [jeAnswers, setJeAnswers] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<{ is_correct: boolean | null; score: number | null; explanation: string | null; correct_answer: string | null; student_answer: string | null } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -120,6 +121,7 @@ export default function StudentPage() {
       }
       setStudentAnswer("");
       setGridAnswers({});
+      setJeAnswers({});
       setSubmitError(null);
       setFeedback(data);
       setSelectedQuestion(q);
@@ -141,10 +143,31 @@ export default function StudentPage() {
     : [];
   const gridComplete = isGridType && gridBlankKeys.length > 0 && gridBlankKeys.every(k => (gridAnswers[k] ?? "").trim() !== "");
 
+  const isJeType = selectedQuestion?.type === "journal_entry";
+  const jeData = isJeType && selectedQuestion?.options && !Array.isArray(selectedQuestion.options)
+    ? (selectedQuestion.options as JournalEntryData)
+    : null;
+  const jeBlankKeys = jeData
+    ? jeData.lines.flatMap((line, lIdx) => {
+        const keys: string[] = [];
+        if (line.account === null) keys.push(jeFieldKey(lIdx, "account"));
+        if (line.debit === null) keys.push(jeFieldKey(lIdx, "debit"));
+        if (line.credit === null) keys.push(jeFieldKey(lIdx, "credit"));
+        return keys;
+      })
+    : [];
+  const jeComplete = isJeType && jeBlankKeys.length > 0 && jeBlankKeys.every(k => (jeAnswers[k] ?? "").trim() !== "");
+
   const submitAnswer = async () => {
     if (!selectedQuestion) return;
-    const answerToSend = isMatchType ? JSON.stringify(matchAnswers) : isGridType ? JSON.stringify(gridAnswers) : studentAnswer;
-    if (isMatchType ? !matchComplete : isGridType ? !gridComplete : !studentAnswer) return;
+    const answerToSend = isMatchType
+      ? JSON.stringify(matchAnswers)
+      : isGridType
+        ? JSON.stringify(gridAnswers)
+        : isJeType
+          ? JSON.stringify(jeAnswers)
+          : studentAnswer;
+    if (isMatchType ? !matchComplete : isGridType ? !gridComplete : isJeType ? !jeComplete : !studentAnswer) return;
     setSubmitting(true);
     setSubmitError(null);
     const res = await fetch("/api/submit", {
@@ -233,6 +256,7 @@ export default function StudentPage() {
                   setStudentAnswer("");
                   setMatchAnswers({});
                   setGridAnswers({});
+                  setJeAnswers({});
                   if (q.type === "matching" && Array.isArray(q.options)) {
                     const uniqueRights = Array.from(new Set((q.options as MatchPair[]).map(p => p.right)));
                     setMatchRightOptions(shuffle(uniqueRights));
@@ -307,7 +331,7 @@ export default function StudentPage() {
 
       {selectedQuestion && (
         <div className="modal-overlay" onClick={() => setSelectedQuestion(null)}>
-          <div className="modal-box" style={isMatchType || isGridType ? { maxWidth: "720px" } : undefined} onClick={e => e.stopPropagation()}>
+          <div className="modal-box" style={isMatchType || isGridType || isJeType ? { maxWidth: "720px" } : undefined} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>
                 <h2 style={{ marginBottom: "4px" }}>{selectedQuestion.title}</h2>
@@ -426,10 +450,76 @@ export default function StudentPage() {
                         </tbody>
                       </table>
                     </div>
+                  ) : isJeType && jeData ? (
+                    <div style={{ overflowX: "auto", marginBottom: "16px" }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Account</th>
+                            <th>Debit</th>
+                            <th>Credit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {jeData.lines.map((line, lIdx) => (
+                            <tr key={lIdx}>
+                              <td>
+                                {line.account !== null ? (
+                                  line.account
+                                ) : (
+                                  <select
+                                    value={jeAnswers[jeFieldKey(lIdx, "account")] || ""}
+                                    onChange={e =>
+                                      setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "account")]: e.target.value }))
+                                    }
+                                    style={{ width: "100%" }}
+                                  >
+                                    <option value="" disabled>Select account...</option>
+                                    {jeData.accountOptions.map(acc => (
+                                      <option key={acc} value={acc}>{acc}</option>
+                                    ))}
+                                  </select>
+                                )}
+                              </td>
+                              <td>
+                                {line.debit !== null ? (
+                                  line.debit
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={jeAnswers[jeFieldKey(lIdx, "debit")] || ""}
+                                    onChange={e =>
+                                      setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "debit")]: e.target.value }))
+                                    }
+                                    placeholder="?"
+                                    style={{ width: "100%", boxSizing: "border-box" }}
+                                  />
+                                )}
+                              </td>
+                              <td>
+                                {line.credit !== null ? (
+                                  line.credit
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={jeAnswers[jeFieldKey(lIdx, "credit")] || ""}
+                                    onChange={e =>
+                                      setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "credit")]: e.target.value }))
+                                    }
+                                    placeholder="?"
+                                    style={{ width: "100%", boxSizing: "border-box" }}
+                                  />
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   ) : null}
                   <button
                     onClick={submitAnswer}
-                    disabled={submitting || (isMatchType ? !matchComplete : isGridType ? !gridComplete : !studentAnswer)}
+                    disabled={submitting || (isMatchType ? !matchComplete : isGridType ? !gridComplete : isJeType ? !jeComplete : !studentAnswer)}
                     className="btn btn-primary"
                     style={{ width: "100%" }}
                   >
@@ -501,6 +591,50 @@ export default function StudentPage() {
                               </tbody>
                             </table>
                           </div>
+                        ) : isJeType && jeData ? (
+                          <div style={{ overflowX: "auto" }}>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Account</th>
+                                  <th>Debit</th>
+                                  <th>Credit</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(() => {
+                                  let studentMap: Record<string, string> = {};
+                                  let correctMap: Record<string, string> = {};
+                                  try { studentMap = JSON.parse(feedback.student_answer || "{}"); } catch { studentMap = {}; }
+                                  try { correctMap = JSON.parse(feedback.correct_answer || "{}"); } catch { correctMap = {}; }
+                                  return jeData.lines.map((line, lIdx) => {
+                                    const accountKey = jeFieldKey(lIdx, "account");
+                                    const debitKey = jeFieldKey(lIdx, "debit");
+                                    const creditKey = jeFieldKey(lIdx, "credit");
+                                    const accountValue = line.account !== null ? line.account : studentMap[accountKey];
+                                    const accountCorrect = line.account !== null || isJeFieldMatch(accountKey, accountValue, correctMap[accountKey]);
+                                    const debitValue = line.debit !== null ? line.debit : studentMap[debitKey];
+                                    const debitCorrect = line.debit !== null || isJeFieldMatch(debitKey, debitValue, correctMap[debitKey]);
+                                    const creditValue = line.credit !== null ? line.credit : studentMap[creditKey];
+                                    const creditCorrect = line.credit !== null || isJeFieldMatch(creditKey, creditValue, correctMap[creditKey]);
+                                    return (
+                                      <tr key={lIdx}>
+                                        <td style={{ color: accountCorrect ? undefined : "var(--red)", fontWeight: line.account === null ? 600 : undefined }}>
+                                          {accountValue || "(no answer)"}
+                                        </td>
+                                        <td style={{ color: debitCorrect ? undefined : "var(--red)", fontWeight: line.debit === null ? 600 : undefined }}>
+                                          {debitValue || (line.debit === null ? "(no answer)" : "")}
+                                        </td>
+                                        <td style={{ color: creditCorrect ? undefined : "var(--red)", fontWeight: line.credit === null ? 600 : undefined }}>
+                                          {creditValue || (line.credit === null ? "(no answer)" : "")}
+                                        </td>
+                                      </tr>
+                                    );
+                                  });
+                                })()}
+                              </tbody>
+                            </table>
+                          </div>
                         ) : (
                           <div className="answer-text" style={{ color: answerColor }}>{feedback.student_answer}</div>
                         )}
@@ -557,6 +691,36 @@ export default function StudentPage() {
                           </tbody>
                         </table>
                       </div>
+                    ) : isJeType && jeData ? (
+                      <div style={{ overflowX: "auto" }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Account</th>
+                              <th>Debit</th>
+                              <th>Credit</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              let correctMap: Record<string, string> = {};
+                              try { correctMap = JSON.parse(feedback.correct_answer || "{}"); } catch { correctMap = {}; }
+                              return jeData.lines.map((line, lIdx) => {
+                                const accountKey = jeFieldKey(lIdx, "account");
+                                const debitKey = jeFieldKey(lIdx, "debit");
+                                const creditKey = jeFieldKey(lIdx, "credit");
+                                return (
+                                  <tr key={lIdx}>
+                                    <td>{line.account !== null ? line.account : correctMap[accountKey] ?? "?"}</td>
+                                    <td>{line.debit !== null ? line.debit : correctMap[debitKey] ?? "?"}</td>
+                                    <td>{line.credit !== null ? line.credit : correctMap[creditKey] ?? "?"}</td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
                     ) : (
                       <div className="answer-text">{feedback.correct_answer}</div>
                     )}
@@ -567,7 +731,7 @@ export default function StudentPage() {
                       <p className="explanation-text">{feedback.explanation || selectedQuestion.explanation}</p>
                     </div>
                   )}
-                  {(isMatchType || isGridType) && feedback.score !== null && (
+                  {(isMatchType || isGridType || isJeType) && feedback.score !== null && (
                     <p style={{ fontSize: "14px", color: "var(--text-muted)", margin: "0 0 4px 0" }}>
                       Score: {feedback.score} / {selectedQuestion.points ?? 1}
                     </p>
@@ -585,10 +749,23 @@ export default function StudentPage() {
                       </p>
                     );
                   })()}
+                  {isJeType && feedback.correct_answer && feedback.student_answer && (() => {
+                    let studentMap: Record<string, string> = {};
+                    let correctMap: Record<string, string> = {};
+                    try { studentMap = JSON.parse(feedback.student_answer); } catch { studentMap = {}; }
+                    try { correctMap = JSON.parse(feedback.correct_answer); } catch { correctMap = {}; }
+                    const keys = Object.keys(correctMap);
+                    const matches = keys.filter(k => isJeFieldMatch(k, studentMap[k], correctMap[k])).length;
+                    return (
+                      <p style={{ fontSize: "14px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
+                        {matches} of {keys.length} blanks correct
+                      </p>
+                    );
+                  })()}
                   {feedback.is_correct !== null && (
                     <div style={{ padding: "12px 16px", borderRadius: "8px", backgroundColor: feedback.is_correct ? "var(--green-light)" : "var(--red-light)", borderLeft: `4px solid ${feedback.is_correct ? "var(--green)" : "var(--red)"}`, marginBottom: "16px" }}>
                       <p style={{ margin: "0", color: feedback.is_correct ? "var(--green)" : "var(--red)", fontWeight: "600" }}>
-                        {feedback.is_correct ? "✓ Correct!" : (isMatchType || isGridType) && feedback.score ? "Partial credit awarded" : "✗ Incorrect"}
+                        {feedback.is_correct ? "✓ Correct!" : (isMatchType || isGridType || isJeType) && feedback.score ? "Partial credit awarded" : "✗ Incorrect"}
                       </p>
                     </div>
                   )}

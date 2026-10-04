@@ -3,10 +3,19 @@ import { createClient } from "@/lib/supabase-client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Question, MatchPair, GridData, GridRow } from "@/lib/types";
+import type { Question, MatchPair, GridData, GridRow, JournalEntryData, JournalEntryLine } from "@/lib/types";
 
 type GridCellEditor = { blank: boolean; value: string };
 type GridRowEditor = { label: string; cells: GridCellEditor[] };
+
+type JELineEditor = {
+  account: string;
+  accountBlank: boolean;
+  debit: string;
+  debitBlank: boolean;
+  credit: string;
+  creditBlank: boolean;
+};
 
 const chapters = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
 
@@ -47,6 +56,9 @@ export default function InstructorPage() {
   const [gridRowLabelInput, setGridRowLabelInput] = useState("");
   const [gridAccountOptions, setGridAccountOptions] = useState<string[]>([]);
   const [gridAccountOptionInput, setGridAccountOptionInput] = useState("");
+  const [jeAccountOptions, setJeAccountOptions] = useState<string[]>([]);
+  const [jeAccountOptionInput, setJeAccountOptionInput] = useState("");
+  const [jeLines, setJeLines] = useState<JELineEditor[]>([]);
   const [filterChapter, setFilterChapter] = useState<number | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -177,6 +189,12 @@ export default function InstructorPage() {
     setGridAccountOptionInput("");
   };
 
+  const resetJeEditor = () => {
+    setJeAccountOptions([]);
+    setJeAccountOptionInput("");
+    setJeLines([]);
+  };
+
   const addGridColumn = () => {
     const label = gridColumnInput.trim();
     if (!label) return;
@@ -229,6 +247,32 @@ export default function InstructorPage() {
     setGridAccountOptions(current => current.filter(o => o !== option));
   };
 
+  const addJeAccountOption = () => {
+    const label = jeAccountOptionInput.trim();
+    if (!label || jeAccountOptions.includes(label)) return;
+    setJeAccountOptions(current => [...current, label]);
+    setJeAccountOptionInput("");
+  };
+
+  const removeJeAccountOption = (option: string) => {
+    setJeAccountOptions(current => current.filter(o => o !== option));
+  };
+
+  const addJeLine = () => {
+    setJeLines(current => [
+      ...current,
+      { account: "", accountBlank: false, debit: "", debitBlank: false, credit: "", creditBlank: false },
+    ]);
+  };
+
+  const removeJeLine = (lineIdx: number) => {
+    setJeLines(current => current.filter((_, i) => i !== lineIdx));
+  };
+
+  const updateJeLine = (lineIdx: number, patch: Partial<JELineEditor>) => {
+    setJeLines(current => current.map((l, i) => (i === lineIdx ? { ...l, ...patch } : l)));
+  };
+
   const validateGrid = (): string | null => {
     if (gridColumns.length === 0) return "Add at least one column.";
     if (gridRows.length === 0) return "Add at least one row.";
@@ -247,6 +291,32 @@ export default function InstructorPage() {
     return null;
   };
 
+  const validateJe = (): string | null => {
+    if (jeLines.length === 0) return "Add at least one line.";
+    let hasBlank = false;
+    for (const line of jeLines) {
+      if (line.accountBlank) {
+        hasBlank = true;
+        if (!line.account.trim()) return "Every blank account needs a correct answer selected.";
+      }
+      if (line.debitBlank) {
+        hasBlank = true;
+        if (line.debit.trim() === "" || Number.isNaN(parseFloat(line.debit))) return "Every blank debit needs a numeric correct answer.";
+      } else if (line.debit.trim() !== "" && Number.isNaN(parseFloat(line.debit))) {
+        return "Debit values must be numeric.";
+      }
+      if (line.creditBlank) {
+        hasBlank = true;
+        if (line.credit.trim() === "" || Number.isNaN(parseFloat(line.credit))) return "Every blank credit needs a numeric correct answer.";
+      } else if (line.credit.trim() !== "" && Number.isNaN(parseFloat(line.credit))) {
+        return "Credit values must be numeric.";
+      }
+      if (!line.account.trim()) return "Every line needs an account selected.";
+    }
+    if (!hasBlank) return "Mark at least one field as blank for students to fill in.";
+    return null;
+  };
+
   const buildGridPayload = (): { options: GridData; correct_answer: string } => {
     const correctMap: Record<string, string> = {};
     const rows: GridRow[] = gridRows.map((row, rIdx) => ({
@@ -261,6 +331,30 @@ export default function InstructorPage() {
       }),
     }));
     return { options: { columns: gridColumns, rows }, correct_answer: JSON.stringify(correctMap) };
+  };
+
+  const buildJePayload = (): { options: JournalEntryData; correct_answer: string } => {
+    const correctMap: Record<string, string> = {};
+    const lines: JournalEntryLine[] = jeLines.map((line, lIdx) => {
+      if (line.accountBlank) correctMap[`${lIdx}-account`] = line.account.trim();
+      if (line.debitBlank) correctMap[`${lIdx}-debit`] = line.debit.trim();
+      if (line.creditBlank) correctMap[`${lIdx}-credit`] = line.credit.trim();
+
+      return {
+        account: line.accountBlank ? null : line.account.trim() || null,
+        debit: line.debitBlank
+          ? null
+          : line.debit.trim() === ""
+            ? null
+            : Number.isNaN(parseFloat(line.debit)) ? null : parseFloat(line.debit),
+        credit: line.creditBlank
+          ? null
+          : line.credit.trim() === ""
+            ? null
+            : Number.isNaN(parseFloat(line.credit)) ? null : parseFloat(line.credit),
+      };
+    });
+    return { options: { accountOptions: jeAccountOptions, lines }, correct_answer: JSON.stringify(correctMap) };
   };
 
   const editQuestion = async (q: Question) => {
@@ -312,6 +406,31 @@ export default function InstructorPage() {
       resetGridEditor();
     }
 
+    if (q.type === "journal_entry" && q.options && !Array.isArray(q.options)) {
+      const jeData = q.options as JournalEntryData;
+      let correctMap: Record<string, string> = {};
+      try { correctMap = JSON.parse(q.correct_answer || "{}"); } catch { correctMap = {}; }
+      setJeAccountOptions(jeData.accountOptions || []);
+      setJeAccountOptionInput("");
+      setJeLines(
+        (jeData.lines || []).map((line, lIdx) => {
+          const accountKey = `${lIdx}-account`;
+          const debitKey = `${lIdx}-debit`;
+          const creditKey = `${lIdx}-credit`;
+          return {
+            account: line.account === null ? (correctMap[accountKey] ?? "") : line.account,
+            accountBlank: line.account === null,
+            debit: line.debit === null ? (correctMap[debitKey] ?? "") : String(line.debit),
+            debitBlank: line.debit === null,
+            credit: line.credit === null ? (correctMap[creditKey] ?? "") : String(line.credit),
+            creditBlank: line.credit === null,
+          };
+        })
+      );
+    } else {
+      resetJeEditor();
+    }
+
     window.scrollTo({
       top: 0,
       behavior: "smooth",
@@ -321,12 +440,16 @@ export default function InstructorPage() {
   const saveEdit = async () => {
     const isMatchType = type === "matching";
     const isGridType = type === "grid";
+    const isJeType = type === "journal_entry";
     const parsedPairs = isMatchType ? parsePairs(pairs) : [];
 
     if (!editingId || !title || !prompt) return;
     if (isGridType) {
       const gridError = validateGrid();
       if (gridError) { showToast(gridError, "error"); return; }
+    } else if (isJeType) {
+      const jeError = validateJe();
+      if (jeError) { showToast(jeError, "error"); return; }
     } else if (isMatchType ? parsedPairs.length < 2 : !answer) {
       return;
     }
@@ -335,6 +458,7 @@ export default function InstructorPage() {
 
     try {
       const gridPayload = isGridType ? buildGridPayload() : null;
+      const jePayload = isJeType ? buildJePayload() : null;
       const response = await fetch("/api/questions", {
         method: "PATCH",
         headers: {
@@ -346,19 +470,23 @@ export default function InstructorPage() {
           prompt,
           correct_answer: isGridType
             ? gridPayload!.correct_answer
-            : isMatchType
-              ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
-              : answer,
+            : isJeType
+              ? jePayload!.correct_answer
+              : isMatchType
+                ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
+                : answer,
           explanation,
           chapter,
           type,
           options: isGridType
             ? gridPayload!.options
-            : isMatchType
-              ? parsedPairs
-              : type === "multiple_choice"
-                ? options.split("\n").filter(Boolean)
-                : null,
+            : isJeType
+              ? jePayload!.options
+              : isMatchType
+                ? parsedPairs
+                : type === "multiple_choice"
+                  ? options.split("\n").filter(Boolean)
+                  : null,
         }),
       });
 
@@ -379,6 +507,7 @@ export default function InstructorPage() {
       setOptions("");
       setPairs("");
       resetGridEditor();
+      resetJeEditor();
 
       showToast("Question updated");
       await loadQuestions();
@@ -476,12 +605,16 @@ export default function InstructorPage() {
   const createQuestion = async () => {
     const isMatchType = type === "matching";
     const isGridType = type === "grid";
+    const isJeType = type === "journal_entry";
     const parsedPairs = isMatchType ? parsePairs(pairs) : [];
 
     if (!title || !prompt) return;
     if (isGridType) {
       const gridError = validateGrid();
       if (gridError) { showToast(gridError, "error"); return; }
+    } else if (isJeType) {
+      const jeError = validateJe();
+      if (jeError) { showToast(jeError, "error"); return; }
     } else if (isMatchType ? parsedPairs.length < 2 : !answer) {
       return;
     }
@@ -490,6 +623,7 @@ export default function InstructorPage() {
 
     try {
       const gridPayload = isGridType ? buildGridPayload() : null;
+      const jePayload = isJeType ? buildJePayload() : null;
       const response = await fetch("/api/questions", {
         method: "POST",
         headers: {
@@ -500,19 +634,23 @@ export default function InstructorPage() {
           prompt,
           correct_answer: isGridType
             ? gridPayload!.correct_answer
-            : isMatchType
-              ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
-              : answer,
+            : isJeType
+              ? jePayload!.correct_answer
+              : isMatchType
+                ? JSON.stringify(Object.fromEntries(parsedPairs.map(p => [p.id, p.right])))
+                : answer,
           explanation,
           chapter,
           type,
           options: isGridType
             ? gridPayload!.options
-            : isMatchType
-              ? parsedPairs
-              : type === "multiple_choice"
-                ? options.split("\n").filter(Boolean)
-                : null,
+            : isJeType
+              ? jePayload!.options
+              : isMatchType
+                ? parsedPairs
+                : type === "multiple_choice"
+                  ? options.split("\n").filter(Boolean)
+                  : null,
         }),
       });
 
@@ -532,6 +670,7 @@ export default function InstructorPage() {
       setOptions("");
       setPairs("");
       resetGridEditor();
+      resetJeEditor();
 
       showToast("Question created");
       // Reload questions
@@ -551,6 +690,7 @@ export default function InstructorPage() {
 
   const isMatchType = type === "matching";
   const isGridType = type === "grid";
+  const isJeType = type === "journal_entry";
   const questionChapters = Array.from(new Set(questions.map(q => q.chapter))).sort((a, b) => a - b);
   const filteredQuestions = filterChapter ? questions.filter(q => q.chapter === filterChapter) : questions;
 
@@ -585,7 +725,7 @@ export default function InstructorPage() {
               <label>Prompt</label>
               <textarea placeholder="What do you want students to answer?" value={prompt} onChange={e => setPrompt(e.target.value)} />
             </div>
-            {!isMatchType && !isGridType && (
+            {!isMatchType && !isGridType && !isJeType && (
               <div className="form-group">
                 <label>Correct Answer</label>
                 <textarea placeholder="Debit Cash 1000, Credit Revenue 1000" value={answer} onChange={e => setAnswer(e.target.value)} />
@@ -603,6 +743,7 @@ export default function InstructorPage() {
                   <option value="multiple_choice">Multiple Choice</option>
                   <option value="matching">Matching</option>
                   <option value="grid">Grid (Table)</option>
+                  <option value="journal_entry">Journal Entry</option>
                 </select>
               </div>
             </div>
@@ -781,6 +922,148 @@ export default function InstructorPage() {
                 )}
               </div>
             )}
+            {isJeType && (
+              <div className="form-group">
+                <label>Account Options (for the Account dropdown)</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
+                  {jeAccountOptions.map((opt, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 10px",
+                        borderRadius: "16px",
+                        backgroundColor: "rgba(201, 162, 39, 0.12)",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {opt}
+                      <button
+                        type="button"
+                        onClick={() => removeJeAccountOption(opt)}
+                        className="btn btn-ghost"
+                        style={{ padding: "0 4px", fontSize: "12px" }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                  <input
+                    type="text"
+                    placeholder="Account name (e.g., Cash)"
+                    value={jeAccountOptionInput}
+                    onChange={e => setJeAccountOptionInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addJeAccountOption(); } }}
+                  />
+                  <button type="button" onClick={addJeAccountOption} className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>
+                    Add Account
+                  </button>
+                </div>
+
+                <label>Lines</label>
+                <div style={{ overflowX: "auto", marginBottom: "12px" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Account</th>
+                        <th>Debit</th>
+                        <th>Credit</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jeLines.map((line, lIdx) => (
+                        <tr key={lIdx}>
+                          <td style={{ backgroundColor: line.accountBlank ? "rgba(201, 162, 39, 0.12)" : undefined }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                              {jeAccountOptions.length > 0 ? (
+                                <select
+                                  value={line.account}
+                                  onChange={e => updateJeLine(lIdx, { account: e.target.value })}
+                                  style={{ width: "160px" }}
+                                >
+                                  <option value="" disabled>Select account...</option>
+                                  {jeAccountOptions.map(acc => (
+                                    <option key={acc} value={acc}>{acc}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={line.account}
+                                  placeholder="Account name"
+                                  onChange={e => updateJeLine(lIdx, { account: e.target.value })}
+                                  style={{ width: "160px" }}
+                                />
+                              )}
+                              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={line.accountBlank}
+                                  onChange={e => updateJeLine(lIdx, { accountBlank: e.target.checked })}
+                                />
+                                Blank for student
+                              </label>
+                            </div>
+                          </td>
+                          <td style={{ backgroundColor: line.debitBlank ? "rgba(201, 162, 39, 0.12)" : undefined }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                              <input
+                                type="text"
+                                value={line.debit}
+                                placeholder={line.debitBlank ? "Correct answer" : "Amount or blank"}
+                                onChange={e => updateJeLine(lIdx, { debit: e.target.value })}
+                                style={{ width: "110px" }}
+                              />
+                              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={line.debitBlank}
+                                  onChange={e => updateJeLine(lIdx, { debitBlank: e.target.checked })}
+                                />
+                                Blank for student
+                              </label>
+                            </div>
+                          </td>
+                          <td style={{ backgroundColor: line.creditBlank ? "rgba(201, 162, 39, 0.12)" : undefined }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                              <input
+                                type="text"
+                                value={line.credit}
+                                placeholder={line.creditBlank ? "Correct answer" : "Amount or blank"}
+                                onChange={e => updateJeLine(lIdx, { credit: e.target.value })}
+                                style={{ width: "110px" }}
+                              />
+                              <label style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", fontWeight: 400 }}>
+                                <input
+                                  type="checkbox"
+                                  checked={line.creditBlank}
+                                  onChange={e => updateJeLine(lIdx, { creditBlank: e.target.checked })}
+                                />
+                                Blank for student
+                              </label>
+                            </div>
+                          </td>
+                          <td>
+                            <button type="button" onClick={() => removeJeLine(lIdx)} className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: "12px" }}>✕</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginBottom: "16px" }}>
+                  <button type="button" onClick={addJeLine} className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>Add Line</button>
+                </div>
+                <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
+                  Check "Blank for student" on Account, Debit, or Credit to make that field a blank the student must fill in (Account renders as a dropdown, Debit/Credit as numeric inputs). Leave a Debit or Credit field empty and unchecked if that line doesn't use it.
+                </p>
+              </div>
+            )}
             <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
               {editingId ? (
                 <>
@@ -802,6 +1085,7 @@ export default function InstructorPage() {
                       setOptions("");
                       setPairs("");
                       resetGridEditor();
+                      resetJeEditor();
                     }}
                     disabled={savingEdit}
                     className="btn btn-secondary"

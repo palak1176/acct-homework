@@ -13,3 +13,16 @@ export function isNumericMatch(a: unknown, b: unknown, tolerance = 0.01): boolea
 export function gridCellKey(rowIndex: number, colIndex: number): string {
   return `${rowIndex}-${colIndex}`;
 }
+
+export function jeFieldKey(lineIndex: number, field: "account" | "debit" | "credit"): string {
+  return `${lineIndex}-${field}`;
+}
+
+// Account fields use exact string match; debit/credit fields use the
+// same numeric tolerance match as grid cells.
+export function isJeFieldMatch(key: string, studentValue: unknown, correctValue: unknown): boolean {
+  if (key.endsWith("-account")) {
+    return typeof studentValue === "string" && studentValue === correctValue;
+  }
+  return isNumericMatch(studentValue, correctValue);
+}
