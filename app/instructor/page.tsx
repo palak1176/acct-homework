@@ -45,6 +45,8 @@ export default function InstructorPage() {
   const [gridColumnInput, setGridColumnInput] = useState("");
   const [gridRows, setGridRows] = useState<GridRowEditor[]>([]);
   const [gridRowLabelInput, setGridRowLabelInput] = useState("");
+  const [gridAccountOptions, setGridAccountOptions] = useState<string[]>([]);
+  const [gridAccountOptionInput, setGridAccountOptionInput] = useState("");
   const [filterChapter, setFilterChapter] = useState<number | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -171,6 +173,8 @@ export default function InstructorPage() {
     setGridColumnInput("");
     setGridRows([]);
     setGridRowLabelInput("");
+    setGridAccountOptions([]);
+    setGridAccountOptionInput("");
   };
 
   const addGridColumn = () => {
@@ -212,6 +216,17 @@ export default function InstructorPage() {
           : r
       )
     );
+  };
+
+  const addGridAccountOption = () => {
+    const label = gridAccountOptionInput.trim();
+    if (!label || gridAccountOptions.includes(label)) return;
+    setGridAccountOptions(current => [...current, label]);
+    setGridAccountOptionInput("");
+  };
+
+  const removeGridAccountOption = (option: string) => {
+    setGridAccountOptions(current => current.filter(o => o !== option));
   };
 
   const validateGrid = (): string | null => {
@@ -289,6 +304,10 @@ export default function InstructorPage() {
           }),
         }))
       );
+      setGridAccountOptions(
+        Array.from(new Set((gridData.rows || []).map(r => r.label).filter(Boolean)))
+      );
+      setGridAccountOptionInput("");
     } else {
       resetGridEditor();
     }
@@ -608,6 +627,46 @@ export default function InstructorPage() {
             )}
             {isGridType && (
               <div className="form-group">
+                <label>Account Options (for this question's row dropdown)</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
+                  {gridAccountOptions.map((opt, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 10px",
+                        borderRadius: "16px",
+                        backgroundColor: "rgba(201, 162, 39, 0.12)",
+                        fontSize: "13px",
+                      }}
+                    >
+                      {opt}
+                      <button
+                        type="button"
+                        onClick={() => removeGridAccountOption(opt)}
+                        className="btn btn-ghost"
+                        style={{ padding: "0 4px", fontSize: "12px" }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                  <input
+                    type="text"
+                    placeholder="Account name (e.g., Cash)"
+                    value={gridAccountOptionInput}
+                    onChange={e => setGridAccountOptionInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGridAccountOption(); } }}
+                  />
+                  <button type="button" onClick={addGridAccountOption} className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>
+                    Add Account
+                  </button>
+                </div>
+
                 <label>Grid Columns</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "10px" }}>
                   {gridColumns.map((col, cIdx) => (
@@ -649,7 +708,20 @@ export default function InstructorPage() {
                           {gridRows.map((row, rIdx) => (
                             <tr key={rIdx}>
                               <td>
-                                <input type="text" value={row.label} onChange={e => updateGridRowLabel(rIdx, e.target.value)} style={{ width: "80px" }} />
+                                {gridAccountOptions.length > 0 ? (
+                                  <select
+                                    value={row.label}
+                                    onChange={e => updateGridRowLabel(rIdx, e.target.value)}
+                                    style={{ width: "160px" }}
+                                  >
+                                    <option value="" disabled>Select account...</option>
+                                    {gridAccountOptions.map(acc => (
+                                      <option key={acc} value={acc}>{acc}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input type="text" value={row.label} onChange={e => updateGridRowLabel(rIdx, e.target.value)} style={{ width: "80px" }} />
+                                )}
                               </td>
                               {row.cells.map((cell, cIdx) => (
                                 <td key={cIdx} style={{ backgroundColor: cell.blank ? "rgba(201, 162, 39, 0.12)" : undefined }}>
@@ -681,13 +753,25 @@ export default function InstructorPage() {
                       </table>
                     </div>
                     <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-                      <input
-                        type="text"
-                        placeholder={`Row label (e.g., ${String.fromCharCode(65 + gridRows.length)})`}
-                        value={gridRowLabelInput}
-                        onChange={e => setGridRowLabelInput(e.target.value)}
-                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGridRow(); } }}
-                      />
+                      {gridAccountOptions.length > 0 ? (
+                        <select
+                          value={gridRowLabelInput}
+                          onChange={e => setGridRowLabelInput(e.target.value)}
+                        >
+                          <option value="" disabled>Select account...</option>
+                          {gridAccountOptions.map(acc => (
+                            <option key={acc} value={acc}>{acc}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          placeholder={`Row label (e.g., ${String.fromCharCode(65 + gridRows.length)})`}
+                          value={gridRowLabelInput}
+                          onChange={e => setGridRowLabelInput(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addGridRow(); } }}
+                        />
+                      )}
                       <button type="button" onClick={addGridRow} className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}>Add Row</button>
                     </div>
                     <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: "0 0 16px 0" }}>
