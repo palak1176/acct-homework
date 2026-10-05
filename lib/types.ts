@@ -49,6 +49,7 @@ export interface JournalEntryLine {
   account: string | null;
   debit: number | null;
   credit: number | null;
+  sectionLabel?: string;
 }
 
 // Stored in a journal_entry question's `options` column. Any field set

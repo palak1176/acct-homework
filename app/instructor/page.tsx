@@ -1,6 +1,6 @@
 "use client";
 import { createClient } from "@/lib/supabase-client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Question, MatchPair, GridData, GridRow, JournalEntryData, JournalEntryLine } from "@/lib/types";
@@ -15,6 +15,7 @@ type JELineEditor = {
   debitBlank: boolean;
   credit: string;
   creditBlank: boolean;
+  sectionLabel: string;
 };
 
 const chapters = [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12];
@@ -261,7 +262,7 @@ export default function InstructorPage() {
   const addJeLine = () => {
     setJeLines(current => [
       ...current,
-      { account: "", accountBlank: false, debit: "", debitBlank: false, credit: "", creditBlank: false },
+      { account: "", accountBlank: false, debit: "", debitBlank: false, credit: "", creditBlank: false, sectionLabel: ""},
     ]);
   };
 
@@ -352,6 +353,7 @@ export default function InstructorPage() {
           : line.credit.trim() === ""
             ? null
             : Number.isNaN(parseFloat(line.credit)) ? null : parseFloat(line.credit),
+        ...(line.sectionLabel.trim() ? { sectionLabel: line.sectionLabel.trim() } : {}),
       };
     });
     return { options: { accountOptions: jeAccountOptions, lines }, correct_answer: JSON.stringify(correctMap) };
@@ -424,6 +426,7 @@ export default function InstructorPage() {
             debitBlank: line.debit === null,
             credit: line.credit === null ? (correctMap[creditKey] ?? "") : String(line.credit),
             creditBlank: line.credit === null,
+            sectionLabel: line.sectionLabel ?? "",
           };
         })
       );
@@ -975,9 +978,21 @@ export default function InstructorPage() {
                         <th></th>
                       </tr>
                     </thead>
-                    <tbody>
-                      {jeLines.map((line, lIdx) => (
-                        <tr key={lIdx}>
+                  <tbody>
+                    {jeLines.map((line, lIdx) => (
+                      <Fragment key={lIdx}>
+                        <tr>
+                          <td colSpan={4} style={{ paddingTop: lIdx > 0 ? "12px" : undefined, border: "none" }}>
+                            <input
+                              type="text"
+                              placeholder="Section header (optional, e.g. Journal Entry 1)"
+                              value={line.sectionLabel}
+                              onChange={e => updateJeLine(lIdx, { sectionLabel: e.target.value })}
+                              style={{ width: "100%", fontSize: "12px", fontWeight: 600, border: "none", borderBottom: "1px solid var(--border)", borderRadius: 0, background: "transparent", padding: "4px 0" }}
+                            />
+                          </td>
+                        </tr>
+                        <tr>
                           <td style={{ backgroundColor: line.accountBlank ? "rgba(201, 162, 39, 0.12)" : undefined }}>
                             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                               {jeAccountOptions.length > 0 ? (
@@ -1052,8 +1067,9 @@ export default function InstructorPage() {
                             <button type="button" onClick={() => removeJeLine(lIdx)} className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: "12px" }}>✕</button>
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
+                      </Fragment>
+                    ))}
+                  </tbody>  
                   </table>
                 </div>
                 <div style={{ marginBottom: "16px" }}>

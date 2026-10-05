@@ -462,56 +462,65 @@ export default function StudentPage() {
                         </thead>
                         <tbody>
                           {jeData.lines.map((line, lIdx) => (
-                            <tr key={lIdx}>
-                              <td>
-                                {line.account !== null ? (
-                                  line.account
-                                ) : (
-                                  <select
-                                    value={jeAnswers[jeFieldKey(lIdx, "account")] || ""}
-                                    onChange={e =>
-                                      setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "account")]: e.target.value }))
-                                    }
-                                    style={{ width: "100%" }}
-                                  >
-                                    <option value="" disabled>Select account...</option>
-                                    {jeData.accountOptions.map(acc => (
-                                      <option key={acc} value={acc}>{acc}</option>
-                                    ))}
-                                  </select>
-                                )}
-                              </td>
-                              <td>
-                                {line.debit !== null ? (
-                                  line.debit
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={jeAnswers[jeFieldKey(lIdx, "debit")] || ""}
-                                    onChange={e =>
-                                      setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "debit")]: e.target.value }))
-                                    }
-                                    placeholder="?"
-                                    style={{ width: "100%", boxSizing: "border-box" }}
-                                  />
-                                )}
-                              </td>
-                              <td>
-                                {line.credit !== null ? (
-                                  line.credit
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={jeAnswers[jeFieldKey(lIdx, "credit")] || ""}
-                                    onChange={e =>
-                                      setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "credit")]: e.target.value }))
-                                    }
-                                    placeholder="?"
-                                    style={{ width: "100%", boxSizing: "border-box" }}
-                                  />
-                                )}
-                              </td>
-                            </tr>
+                            <Fragment key={lIdx}>
+                              {line.sectionLabel && (
+                                <tr>
+                                  <td colSpan={3} style={{ fontWeight: 700, fontSize: "13px", color: "var(--navy)", paddingTop: lIdx > 0 ? "16px" : undefined, borderBottom: "none" }}>
+                                    {line.sectionLabel}
+                                  </td>
+                                </tr>
+                              )}
+                              <tr>
+                                <td>
+                                  {line.account !== null ? (
+                                    line.account
+                                  ) : (
+                                    <select
+                                      value={jeAnswers[jeFieldKey(lIdx, "account")] || ""}
+                                      onChange={e =>
+                                        setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "account")]: e.target.value }))
+                                      }
+                                      style={{ width: "100%" }}
+                                    >
+                                      <option value="" disabled>Select account...</option>
+                                      {jeData.accountOptions.map(acc => (
+                                        <option key={acc} value={acc}>{acc}</option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </td>
+                                <td>
+                                  {line.debit !== null ? (
+                                    line.debit
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={jeAnswers[jeFieldKey(lIdx, "debit")] || ""}
+                                      onChange={e =>
+                                        setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "debit")]: e.target.value }))
+                                      }
+                                      placeholder="?"
+                                      style={{ width: "100%", boxSizing: "border-box" }}
+                                    />
+                                  )}
+                                </td>
+                                <td>
+                                  {line.credit !== null ? (
+                                    line.credit
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={jeAnswers[jeFieldKey(lIdx, "credit")] || ""}
+                                      onChange={e =>
+                                        setJeAnswers(current => ({ ...current, [jeFieldKey(lIdx, "credit")]: e.target.value }))
+                                      }
+                                      placeholder="?"
+                                      style={{ width: "100%", boxSizing: "border-box" }}
+                                    />
+                                  )}
+                                </td>
+                              </tr>
+                            </Fragment>
                           ))}
                         </tbody>
                       </table>
@@ -618,17 +627,20 @@ export default function StudentPage() {
                                     const creditValue = line.credit !== null ? line.credit : studentMap[creditKey];
                                     const creditCorrect = line.credit !== null || isJeFieldMatch(creditKey, creditValue, correctMap[creditKey]);
                                     return (
-                                      <tr key={lIdx}>
-                                        <td style={{ color: accountCorrect ? undefined : "var(--red)", fontWeight: line.account === null ? 600 : undefined }}>
-                                          {accountValue || "(no answer)"}
-                                        </td>
-                                        <td style={{ color: debitCorrect ? undefined : "var(--red)", fontWeight: line.debit === null ? 600 : undefined }}>
-                                          {debitValue || (line.debit === null ? "(no answer)" : "")}
-                                        </td>
-                                        <td style={{ color: creditCorrect ? undefined : "var(--red)", fontWeight: line.credit === null ? 600 : undefined }}>
-                                          {creditValue || (line.credit === null ? "(no answer)" : "")}
-                                        </td>
-                                      </tr>
+                                      <Fragment key={lIdx}>
+                                        {line.sectionLabel && (
+                                          <tr>
+                                            <td colSpan={3} style={{ fontWeight: 700, fontSize: "13px", color: "var(--navy)", paddingTop: lIdx > 0 ? "16px" : undefined, borderBottom: "none" }}>
+                                              {line.sectionLabel}
+                                            </td>
+                                          </tr>
+                                        )}
+                                        <tr>
+                                          <td>{line.account !== null ? line.account : correctMap[accountKey] ?? "?"}</td>
+                                          <td>{line.debit !== null ? line.debit : correctMap[debitKey] ?? "?"}</td>
+                                          <td>{line.credit !== null ? line.credit : correctMap[creditKey] ?? "?"}</td>
+                                        </tr>
+                                      </Fragment>
                                     );
                                   });
                                 })()}
