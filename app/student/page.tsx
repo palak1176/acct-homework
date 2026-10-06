@@ -703,7 +703,7 @@ export default function StudentPage() {
                           </tbody>
                         </table>
                       </div>
-                    ) : isJeType && jeData ? (
+                    ): isJeType && jeData ? (
                       <div style={{ overflowX: "auto" }}>
                         <table>
                           <thead>
@@ -716,18 +716,53 @@ export default function StudentPage() {
                           <tbody>
                             {(() => {
                               let correctMap: Record<string, string> = {};
-                              try { correctMap = JSON.parse(feedback.correct_answer || "{}"); } catch { correctMap = {}; }
-                              return jeData.lines.map((line, lIdx) => {
+
+                              try {
+                                correctMap = JSON.parse(feedback.correct_answer || "{}");
+                              } catch {
+                                correctMap = {};
+                              }
+
+                              return jeData.lines.flatMap((line, lIdx) => {
                                 const accountKey = jeFieldKey(lIdx, "account");
                                 const debitKey = jeFieldKey(lIdx, "debit");
                                 const creditKey = jeFieldKey(lIdx, "credit");
-                                return (
-                                  <tr key={lIdx}>
-                                    <td>{line.account !== null ? line.account : correctMap[accountKey] ?? "?"}</td>
-                                    <td>{line.debit !== null ? line.debit : correctMap[debitKey] ?? "?"}</td>
-                                    <td>{line.credit !== null ? line.credit : correctMap[creditKey] ?? "?"}</td>
+
+                                const rows = [];
+
+                                // Add the section/question heading if one exists
+                                if (line.sectionLabel) {
+                                  rows.push(
+                                    <tr key={`${lIdx}-section`}>
+                                      <td colSpan={3}>
+                                        <strong>{line.sectionLabel}</strong>
+                                      </td>
+                                    </tr>
+                                  );
+                                }
+
+                                // Add the journal-entry row
+                                rows.push(
+                                  <tr key={`${lIdx}-entry`}>
+                                    <td>
+                                      {line.account !== null
+                                        ? line.account
+                                        : correctMap[accountKey] ?? "?"}
+                                    </td>
+                                    <td>
+                                      {line.debit !== null
+                                        ? line.debit
+                                        : correctMap[debitKey] ?? "?"}
+                                    </td>
+                                    <td>
+                                      {line.credit !== null
+                                        ? line.credit
+                                        : correctMap[creditKey] ?? "?"}
+                                    </td>
                                   </tr>
                                 );
+
+                                return rows;
                               });
                             })()}
                           </tbody>
