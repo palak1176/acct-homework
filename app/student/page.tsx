@@ -636,9 +636,9 @@ export default function StudentPage() {
                                           </tr>
                                         )}
                                         <tr>
-                                          <td>{line.account !== null ? line.account : correctMap[accountKey] ?? "?"}</td>
-                                          <td>{line.debit !== null ? line.debit : correctMap[debitKey] ?? "?"}</td>
-                                          <td>{line.credit !== null ? line.credit : correctMap[creditKey] ?? "?"}</td>
+                                          <td>{line.account !== null ? line.account : studentMap[accountKey] ?? "?"}</td>
+                                          <td>{line.debit !== null ? line.debit : studentMap[debitKey] ?? "?"}</td>
+                                          <td>{line.credit !== null ? line.credit : studentMap[creditKey] ?? "?"}</td>
                                         </tr>
                                       </Fragment>
                                     );
